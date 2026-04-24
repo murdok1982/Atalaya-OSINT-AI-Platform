@@ -19,7 +19,8 @@ export default function LoginPage() {
     setLoading(true)
     try {
       const token = await api.login(username, password)
-      localStorage.setItem('access_token', token.access_token)
+      sessionStorage.setItem('access_token', token.access_token)
+      if (token.refresh_token) sessionStorage.setItem('refresh_token', token.refresh_token)
       router.push('/')
     } catch (e: any) {
       toast.error(e.message ?? 'Invalid credentials')

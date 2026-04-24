@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select, update
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import CurrentUser, DBSession, get_current_active_user
+from app.api.deps import CurrentUser, DBSession
 from app.core.audit import AuditAction, AuditContext, log_audit
 from app.core.security import (
     create_access_token,
@@ -59,7 +57,7 @@ async def login(
         db=db,
     )
 
-    token_data = {"sub": user.id, "scopes": user.scopes}
+    token_data = {"sub": str(user.id), "scopes": user.scopes}
     return Token(
         access_token=create_access_token(token_data),
         refresh_token=create_refresh_token(token_data),
@@ -81,7 +79,7 @@ async def refresh(body: TokenRefresh, db: DBSession) -> Token:
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
 
-    token_data = {"sub": user.id, "scopes": user.scopes}
+    token_data = {"sub": str(user.id), "scopes": user.scopes}
     return Token(
         access_token=create_access_token(token_data),
         refresh_token=create_refresh_token(token_data),

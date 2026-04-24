@@ -18,6 +18,13 @@ _BLOCKED_NETWORKS = [
     ipaddress.ip_network("fc00::/7"),
 ]
 
+_BLOCKED_HOSTNAMES = {
+    "localhost",
+    "metadata.google.internal",
+    "metadata.google",
+    "169.254.169.254",
+}
+
 _DEFAULT_HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; AtalayaBot/0.1; OSINT Research)",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -26,17 +33,24 @@ _DEFAULT_HEADERS = {
 
 
 def _is_safe_url(url: str) -> bool:
-    """SSRF prevention: block private/internal URLs."""
+    """SSRF prevention: block private/internal IPs and known internal hostnames."""
     try:
         parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False
         host = parsed.hostname or ""
         if not host:
+            return False
+        if host.lower() in _BLOCKED_HOSTNAMES:
             return False
         try:
             addr = ipaddress.ip_address(host)
             return not any(addr in net for net in _BLOCKED_NETWORKS)
         except ValueError:
-            # It's a hostname, not IP — allow (DNS will resolve later)
+            # Hostname — block if it ends with .local, .internal, or .localhost
+            lower = host.lower()
+            if lower.endswith((".local", ".internal", ".localhost", ".localdomain")):
+                return False
             return True
     except Exception:
         return False

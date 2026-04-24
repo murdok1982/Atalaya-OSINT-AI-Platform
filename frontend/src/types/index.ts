@@ -1,13 +1,17 @@
 export type CaseStatus = 'OPEN' | 'ACTIVE' | 'CLOSED' | 'ARCHIVED'
 export type CasePriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
+export type CaseClassification = 'UNCLASSIFIED' | 'RESTRICTED' | 'CONFIDENTIAL'
 export type EntityType =
   | 'PERSON' | 'ORGANIZATION' | 'DOMAIN' | 'EMAIL' | 'PHONE'
   | 'IP' | 'ASN' | 'HANDLE' | 'CHANNEL' | 'URL' | 'DOCUMENT'
   | 'IMAGE' | 'LOCATION' | 'ALIAS'
-export type JobStatus = 'PENDING' | 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'
+export type JobStatus =
+  | 'PENDING' | 'QUEUED' | 'RUNNING' | 'COMPLETED'
+  | 'FAILED' | 'CANCELLED' | 'PENDING_APPROVAL'
 export type JobType =
-  | 'OSINT_RESEARCH' | 'SOCMINT' | 'ENTITY_RESOLUTION'
-  | 'DOMAIN_INVESTIGATION' | 'REPORT_GENERATION' | 'CUSTOM'
+  | 'COORDINATOR' | 'OSINT' | 'SOCMINT' | 'ENTITY_RESOLUTION'
+  | 'SOURCE_VALIDATION' | 'OSINT_RESEARCH' | 'DOMAIN_INVESTIGATION'
+  | 'REPORT_GENERATION' | 'CUSTOM'
 export type EvidenceType =
   | 'URL' | 'FILE' | 'SCREENSHOT' | 'TEXT' | 'METADATA'
   | 'API_RESPONSE' | 'DNS_RECORD' | 'WHOIS' | 'CERTIFICATE'
@@ -22,7 +26,7 @@ export interface Case {
   tags: string[]
   operator_id: string
   scope_notes: string
-  classification: string
+  classification: CaseClassification
   created_at: string
   updated_at: string
   entity_count: number

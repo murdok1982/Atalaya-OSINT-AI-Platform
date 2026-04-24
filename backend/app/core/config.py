@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_INSECURE_SECRET = "CHANGE_ME_in_production"
 
 
 class Settings(BaseSettings):
@@ -13,7 +15,7 @@ class Settings(BaseSettings):
     # Application
     ENVIRONMENT: Literal["development", "production", "testing"] = "development"
     LOG_LEVEL: str = "INFO"
-    SECRET_KEY: str = "CHANGE_ME_in_production"
+    SECRET_KEY: str = _INSECURE_SECRET
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
@@ -23,6 +25,7 @@ class Settings(BaseSettings):
     API_PORT: int = 8000
     FRONTEND_PORT: int = 3000
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
+    ALLOWED_HOSTS: list[str] = ["localhost", "127.0.0.1"]
 
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://atalaya_user:atalaya_pass@localhost:5432/atalaya_db"
@@ -69,11 +72,11 @@ class Settings(BaseSettings):
     SECURITYTRAILS_API_KEY: str = ""
     HIBP_API_KEY: str = ""
 
-    @field_validator("CORS_ORIGINS", mode="before")
+    @field_validator("CORS_ORIGINS", "ALLOWED_HOSTS", mode="before")
     @classmethod
-    def parse_cors(cls, v: str | list) -> list[str]:
+    def parse_str_list(cls, v: str | list) -> list[str]:
         if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",")]
+            return [item.strip() for item in v.split(",") if item.strip()]
         return v
 
     @field_validator("TELEGRAM_ALLOWED_CHATS", mode="before")
@@ -84,6 +87,15 @@ class Settings(BaseSettings):
         if isinstance(v, list):
             return v
         return []
+
+    @model_validator(mode="after")
+    def validate_production_secrets(self) -> Self:
+        if self.ENVIRONMENT == "production" and self.SECRET_KEY == _INSECURE_SECRET:
+            raise ValueError(
+                "SECRET_KEY must be changed from the default value before running in production. "
+                "Generate one with: python scripts/generate_keys.py"
+            )
+        return self
 
     @property
     def is_production(self) -> bool:

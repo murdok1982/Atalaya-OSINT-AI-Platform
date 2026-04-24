@@ -4,7 +4,7 @@ const API_BASE = '/api/v1'
 
 function getAuthHeader(): Record<string, string> {
   if (typeof window === 'undefined') return {}
-  const token = localStorage.getItem('access_token')
+  const token = sessionStorage.getItem('access_token')
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
@@ -14,7 +14,7 @@ export async function fetcher<T>(url: string): Promise<T> {
   })
   if (res.status === 401) {
     if (typeof window !== 'undefined') {
-      localStorage.removeItem('access_token')
+      sessionStorage.removeItem('access_token')
       window.location.href = '/login'
     }
     throw new Error('Unauthorized')
@@ -51,8 +51,8 @@ export const api = {
       'POST', '/auth/login', { username, password }
     ),
   logout: () => {
-    localStorage.removeItem('access_token')
-    localStorage.removeItem('refresh_token')
+    sessionStorage.removeItem('access_token')
+    sessionStorage.removeItem('refresh_token')
   },
   me: () => fetcher<{ id: string; username: string; email: string; scopes: string[] }>('/auth/me'),
 

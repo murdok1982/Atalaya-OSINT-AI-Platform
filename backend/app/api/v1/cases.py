@@ -25,25 +25,47 @@ async def list_cases(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
 ) -> list[CaseListItem]:
-    q = select(Case).where(Case.deleted.is_(False))
+    entity_count_sq = (
+        select(Entity.case_id, func.count(Entity.id).label("cnt"))
+        .group_by(Entity.case_id)
+        .subquery()
+    )
+    evidence_count_sq = (
+        select(Evidence.case_id, func.count(Evidence.id).label("cnt"))
+        .group_by(Evidence.case_id)
+        .subquery()
+    )
+    job_count_sq = (
+        select(Job.case_id, func.count(Job.id).label("cnt"))
+        .group_by(Job.case_id)
+        .subquery()
+    )
+
+    q = (
+        select(
+            Case,
+            func.coalesce(entity_count_sq.c.cnt, 0).label("entity_count"),
+            func.coalesce(evidence_count_sq.c.cnt, 0).label("evidence_count"),
+            func.coalesce(job_count_sq.c.cnt, 0).label("job_count"),
+        )
+        .outerjoin(entity_count_sq, entity_count_sq.c.case_id == Case.id)
+        .outerjoin(evidence_count_sq, evidence_count_sq.c.case_id == Case.id)
+        .outerjoin(job_count_sq, job_count_sq.c.case_id == Case.id)
+        .where(Case.deleted.is_(False))
+    )
     if status_filter:
         q = q.where(Case.status == status_filter)
     if priority_filter:
         q = q.where(Case.priority == priority_filter)
     q = q.order_by(Case.updated_at.desc()).offset(skip).limit(limit)
 
-    result = await db.execute(q)
-    cases = result.scalars().all()
-
+    rows = (await db.execute(q)).all()
     items = []
-    for case in cases:
-        ec = await db.scalar(select(func.count(Entity.id)).where(Entity.case_id == case.id)) or 0
-        evc = await db.scalar(select(func.count(Evidence.id)).where(Evidence.case_id == case.id)) or 0
-        jc = await db.scalar(select(func.count(Job.id)).where(Job.case_id == case.id)) or 0
-        item = CaseListItem.model_validate(case)
-        item.entity_count = ec
-        item.evidence_count = evc
-        item.job_count = jc
+    for row in rows:
+        item = CaseListItem.model_validate(row.Case)
+        item.entity_count = row.entity_count
+        item.evidence_count = row.evidence_count
+        item.job_count = row.job_count
         items.append(item)
     return items
 
