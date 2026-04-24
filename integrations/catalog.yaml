@@ -1,0 +1,196 @@
+# Atalaya Integrations Catalog
+# Each entry defines an optional external intelligence source.
+# "builtin" integrations need no API key.
+# "optional" integrations require an API key configured in .env.
+
+integrations:
+  # ── DNS & Network ──────────────────────────────────────────
+
+  - id: dns_resolver
+    name: DNS Resolver
+    category: network
+    tier: builtin
+    description: Resolves A, AAAA, MX, TXT, NS, SOA, CNAME records via dnspython
+    rate_limit: 30/min
+    env_key: ~
+    tool_class: app.tools.dns_tools.DnsLookupTool
+    data_types: [DOMAIN, IP_ADDRESS]
+
+  - id: rdap_whois
+    name: RDAP / WHOIS
+    category: network
+    tier: builtin
+    description: Domain and IP registration data via RDAP (rdap.org) with python-whois fallback
+    rate_limit: 10/min
+    env_key: ~
+    tool_class: app.tools.whois_tools.WhoisQueryTool
+    data_types: [DOMAIN, IP_ADDRESS, ASN]
+
+  - id: certificate_transparency
+    name: Certificate Transparency (crt.sh)
+    category: certificates
+    tier: builtin
+    description: Search crt.sh for SSL/TLS certificates by domain or organization
+    rate_limit: 20/min
+    env_key: ~
+    tool_class: app.tools.cert_tools.CertSearchTool
+    data_types: [DOMAIN, ORGANIZATION]
+
+  - id: ip_geolocation
+    name: IP Geolocation (ip-api.com)
+    category: network
+    tier: builtin
+    description: Country, city, ISP, ASN lookup for IPv4/IPv6 addresses (free tier)
+    rate_limit: 45/min
+    env_key: ~
+    tool_class: app.tools.web_tools.IpGeolocationTool
+    data_types: [IP_ADDRESS]
+
+  # ── Web Intelligence ───────────────────────────────────────
+
+  - id: web_fetch
+    name: Web Fetch
+    category: web
+    tier: builtin
+    description: Fetch and extract text from public web pages (trafilatura + BeautifulSoup)
+    rate_limit: 20/min
+    env_key: ~
+    tool_class: app.tools.web_tools.WebFetchTool
+    ssrf_protection: true
+    data_types: [URL, DOMAIN]
+
+  - id: web_search
+    name: Web Search (DuckDuckGo)
+    category: web
+    tier: builtin
+    description: Search the web via DuckDuckGo (no API key required)
+    rate_limit: 10/min
+    env_key: ~
+    tool_class: app.tools.web_tools.WebSearchTool
+    data_types: [all]
+
+  - id: wayback_machine
+    name: Wayback Machine (archive.org)
+    category: web
+    tier: builtin
+    description: Historical snapshots of websites via Internet Archive CDX API
+    rate_limit: 10/min
+    env_key: ~
+    tool_class: app.tools.archive_tools.ArchiveLookupTool
+    data_types: [URL, DOMAIN]
+
+  # ── Social & Open Source ───────────────────────────────────
+
+  - id: github_public
+    name: GitHub (public API)
+    category: social
+    tier: builtin
+    description: Public GitHub profile and repository data (unauthenticated rate limit applies)
+    rate_limit: 30/min
+    env_key: ~
+    tool_class: app.tools.social_tools.SocialProfileFetchTool
+    data_types: [USERNAME, EMAIL, ORGANIZATION]
+
+  - id: reddit_public
+    name: Reddit (public JSON)
+    category: social
+    tier: builtin
+    description: Public Reddit user profiles via JSON API
+    rate_limit: 30/min
+    env_key: ~
+    tool_class: app.tools.social_tools.SocialProfileFetchTool
+    data_types: [USERNAME]
+
+  - id: document_extract
+    name: Document Extractor
+    category: files
+    tier: builtin
+    description: Extract text and metadata from PDF, DOCX, and images (EXIF)
+    rate_limit: ~
+    env_key: ~
+    tool_class: app.tools.document_tools.DocumentExtractTool
+    data_types: [DOCUMENT, IMAGE]
+
+  # ── Optional: Threat Intelligence ─────────────────────────
+
+  - id: shodan
+    name: Shodan
+    category: threat_intel
+    tier: optional
+    description: Internet-connected device search — ports, banners, vulnerabilities
+    rate_limit: 1/sec
+    env_key: SHODAN_API_KEY
+    docs_url: https://developer.shodan.io/
+    data_types: [IP_ADDRESS, DOMAIN]
+
+  - id: virustotal
+    name: VirusTotal
+    category: threat_intel
+    tier: optional
+    description: File hash, URL, domain, and IP threat intelligence
+    rate_limit: 4/min   # free tier
+    env_key: VIRUSTOTAL_API_KEY
+    docs_url: https://developers.virustotal.com/
+    data_types: [HASH, URL, DOMAIN, IP_ADDRESS]
+
+  - id: urlscan
+    name: URLScan.io
+    category: threat_intel
+    tier: optional
+    description: Website screenshot, DOM, requests scan
+    rate_limit: 5/min
+    env_key: URLSCAN_API_KEY
+    docs_url: https://urlscan.io/about-api/
+    data_types: [URL, DOMAIN]
+
+  - id: censys
+    name: Censys
+    category: threat_intel
+    tier: optional
+    description: Internet-wide asset discovery and certificate search
+    rate_limit: 0.4/sec  # free tier
+    env_key: CENSYS_API_ID
+    docs_url: https://search.censys.io/api
+    data_types: [IP_ADDRESS, DOMAIN, CERTIFICATE]
+
+  - id: securitytrails
+    name: SecurityTrails
+    category: threat_intel
+    tier: optional
+    description: Historical DNS, subdomains, and domain history
+    rate_limit: 2/sec
+    env_key: SECURITYTRAILS_API_KEY
+    docs_url: https://securitytrails.com/corp/api
+    data_types: [DOMAIN, IP_ADDRESS]
+
+  # ── Optional: OSINT ────────────────────────────────────────
+
+  - id: hunter_io
+    name: Hunter.io
+    category: osint
+    tier: optional
+    description: Email address discovery and verification by domain
+    rate_limit: 3/sec
+    env_key: HUNTER_API_KEY
+    docs_url: https://hunter.io/api-documentation
+    data_types: [DOMAIN, EMAIL, ORGANIZATION]
+
+  - id: hibp
+    name: Have I Been Pwned
+    category: osint
+    tier: optional
+    description: Check if email addresses appear in known data breaches
+    rate_limit: 1.5/sec
+    env_key: HIBP_API_KEY
+    docs_url: https://haveibeenpwned.com/API/v3
+    data_types: [EMAIL]
+
+  - id: ipinfo
+    name: ipinfo.io
+    category: network
+    tier: optional
+    description: Enhanced IP geolocation with ASN, company, and privacy detection
+    rate_limit: 50000/month  # free tier
+    env_key: IPINFO_API_KEY
+    docs_url: https://ipinfo.io/developers
+    data_types: [IP_ADDRESS]

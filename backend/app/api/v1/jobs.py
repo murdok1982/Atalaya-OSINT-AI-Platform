@@ -1,0 +1,98 @@
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timezone
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.deps import CurrentUser, DBSession, require_scope
+from app.models.job import Job, JobStatus
+from app.schemas.job import JobCreate, JobListItem, JobResponse
+
+router = APIRouter()
+
+
+@router.get("", response_model=list[JobListItem])
+async def list_jobs(
+    db: DBSession,
+    user: Annotated[object, Depends(require_scope("read:cases"))],
+    case_id: str | None = None,
+    status_filter: str | None = Query(None, alias="status"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+) -> list[JobListItem]:
+    q = select(Job)
+    if case_id:
+        q = q.where(Job.case_id == case_id)
+    if status_filter:
+        q = q.where(Job.status == status_filter)
+    q = q.order_by(Job.created_at.desc()).offset(skip).limit(limit)
+    result = await db.execute(q)
+    return [JobListItem.model_validate(j) for j in result.scalars().all()]
+
+
+@router.post("", response_model=JobResponse, status_code=status.HTTP_201_CREATED)
+async def create_job(
+    body: JobCreate,
+    db: DBSession,
+    user: Annotated[object, Depends(require_scope("execute:jobs"))],
+) -> JobResponse:
+    job = Job(
+        id=str(uuid.uuid4()),
+        case_id=body.case_id,
+        job_type=body.job_type,
+        status=JobStatus.PENDING,
+        created_by=user.id,  # type: ignore[attr-defined]
+        task_description=body.task_description,
+        input_params={**body.input_params, **({"task": body.task_description} if body.task_description else {})},
+    )
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+
+    # Enqueue via ARQ
+    try:
+        from app.jobs.tasks import enqueue_job  # noqa: PLC0415
+        arq_id = await enqueue_job(job)
+        job.arq_job_id = arq_id
+        job.status = JobStatus.QUEUED
+        await db.commit()
+        await db.refresh(job)
+    except Exception:
+        pass
+
+    return JobResponse.model_validate(job)
+
+
+@router.get("/{job_id}", response_model=JobResponse)
+async def get_job(
+    job_id: str,
+    db: DBSession,
+    user: Annotated[object, Depends(require_scope("read:cases"))],
+) -> JobResponse:
+    job = await _get_or_404(db, job_id)
+    return JobResponse.model_validate(job)
+
+
+@router.post("/{job_id}/cancel", status_code=status.HTTP_204_NO_CONTENT)
+async def cancel_job(
+    job_id: str,
+    db: DBSession,
+    user: Annotated[object, Depends(require_scope("execute:jobs"))],
+) -> None:
+    job = await _get_or_404(db, job_id)
+    if job.status not in (JobStatus.PENDING, JobStatus.QUEUED, JobStatus.RUNNING):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Job cannot be cancelled")
+    job.status = JobStatus.CANCELLED
+    await db.commit()
+
+
+async def _get_or_404(db: AsyncSession, job_id: str) -> Job:
+    result = await db.execute(select(Job).where(Job.id == job_id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    return job
