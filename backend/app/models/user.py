@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import ARRAY, Boolean, DateTime, String, Text
+from sqlalchemy import ARRAY, Boolean, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import BaseModel
@@ -20,5 +20,12 @@ class User(BaseModel):
     scopes: Mapped[list[str]] = mapped_column(ARRAY(String), default=list, nullable=False)
     last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    classification: Mapped[str] = mapped_column(String(32), default="UNCLASSIFIED", nullable=False)
+    tenant_id: Mapped[str] = mapped_column(String(64), default="default", nullable=False, index=True)
+    failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    department: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    clearance_level: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     cases: Mapped[list["Case"]] = relationship("Case", back_populates="operator", lazy="dynamic")  # type: ignore[name-defined]  # noqa: F821

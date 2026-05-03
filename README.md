@@ -1,172 +1,143 @@
 <div align="center">
-  <h1>👁️ Atalaya OSINT AI Platform</h1>
-  <p><i>Un arnés avanzado y modular para Inteligencia Artificial en investigaciones de Fuentes Abiertas (OSINT).</i></p>
+  <img src="global_intel_map_tactical.png" width="100%" alt="Atalaya Global Intelligence Map">
+  <h1>👁️ ATALAYA OSINT AI PLATFORM v2.0</h1>
+  <p><b>CENTRO DE MANDO Y CONTROL DE INTELIGENCIA MULTI-DISCIPLINA</b></p>
+  <p><i>State-grade intelligence collection, multi-INT fusion, and automated reporting system</i></p>
 
   [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg?logo=python&logoColor=white)](https://python.org)
   [![Next.js](https://img.shields.io/badge/Next.js-14+-black.svg?logo=next.js&logoColor=white)](https://nextjs.org/)
-  [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-  [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791.svg?logo=postgresql&logoColor=white)](https://postgresql.org)
-  [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED.svg?logo=docker&logoColor=white)](https://docker.com)
+  [![Security](https://img.shields.io/badge/Security-Military--Grade-red.svg)](https://github.com/murdok1982/Atalaya-OSINT-AI-Platform)
+  [![Classification](https://img.shields.io/badge/Classification-TOP--SECRET-black.svg)](https://github.com/murdok1982/Atalaya-OSINT-AI-Platform)
 </div>
 
 ---
 
-## 📌 Mi Opinión Profesional sobre el Proyecto
+## 🎖️ VISIÓN ESTRATÉGICA
 
-Tras analizar el repositorio, **Atalaya OSINT** destaca como una plataforma robusta y excepcionalmente bien estructurada. 
-* **Arquitectura Escalable:** El uso de **FastAPI** junto con **ARQ (Redis)** para la gestión asíncrona de tareas pesadas de investigación garantiza que la plataforma pueda manejar un gran volumen de datos sin bloquearse.
-* **Integración Nativa de IA:** La inclusión de **Qdrant** (base de datos vectorial) nativamente en el `docker-compose` evidencia un diseño pensado desde cero para el análisis semántico y la Inteligencia Artificial (RAG - Retrieval-Augmented Generation).
-* **Modularidad de OSINT:** El archivo `catalog.yaml` presenta un diseño elegante para separar integraciones nativas de aquellas que requieren claves API (Shodan, VirusTotal, etc.), lo que permite que el sistema sea útil incluso en su versión gratuita.
-* **Developer Experience (DX):** El uso extensivo de un `Makefile` muy completo permite levantar toda la infraestructura compleja con un simple comando.
+**ATALAYA** ha evolucionado de una herramienta de recolección de datos a una plataforma de **Inteligencia de Grado Estatal**. Diseñada para analistas de inteligencia, operativos de ciberseguridad y unidades de defensa, Atalaya v2.0 proporciona una visión holística de amenazas mediante la fusión de múltiples disciplinas de inteligencia en tiempo real.
 
-En resumen, es un arnés de IA para OSINT con un nivel empresarial, listo para producción y altamente extensible.
+> [!IMPORTANT]
+> **DOCUMENTACIÓN CLASIFICADA:** El acceso a esta plataforma requiere niveles de autorización adecuados. Toda actividad es registrada en una cadena de custodia inmutable mediante *Hash Chaining*.
 
 ---
 
-## 🗺️ Arquitectura del Sistema
+## 📊 CAPACIDADES TÁCTICAS (Multi-INT)
 
-La arquitectura de Atalaya se divide en microservicios interconectados, garantizando alta disponibilidad y separación de responsabilidades.
+Atalaya integra 8 disciplinas de inteligencia bajo un único motor de fusión correlacional:
 
+| Disciplina | Descripción | Estado |
+|:---|:---|:---:|
+| **OSINT** | Inteligencia de fuentes abiertas: DNS, IP, Dominios, Infraestructura. | ✅ OPERATIVO |
+| **SOCMINT** | Inteligencia de Redes Sociales: Análisis de grafos de influencia y perfiles. | ✅ OPERATIVO |
+| **GEOINT** | Inteligencia Geoespacial: Análisis satelital y mapas tácticos dinámicos. | ✅ OPERATIVO |
+| **IMINT** | Inteligencia de Imágenes: EXIF profundo, OCR, análisis de manipulación. | ✅ OPERATIVO |
+| **FININT** | Inteligencia Financiera: Rastreo de cripto-activos y detección de AML. | ✅ OPERATIVO |
+| **CYBINT** | Inteligencia de Ciberamenazas: Mapeo MITRE ATT&CK e IoCs. | ✅ OPERATIVO |
+| **DARKWEB** | Monitoreo de Dark Web: Breach databases y paste sites. | ✅ OPERATIVO |
+| **MULTI-INT FUSION** | Correlación cruzada inteligente de todas las fuentes anteriores. | ✅ OPERATIVO |
+
+---
+
+## 🏗️ ARQUITECTURA DE MISIÓN (Event-Driven)
+
+La plataforma utiliza una arquitectura orientada a eventos para garantizar el procesamiento masivo y la integridad de los datos.
+
+### Motor de Fusión Inteligente
 ```mermaid
-graph TD
-    User([Usuario / Analista]) -->|HTTP/REST| UI[Frontend: Next.js]
-    UI -->|API Calls| API[Backend: FastAPI]
-    
-    API --> DB[(PostgreSQL)]
-    API --> Cache[(Redis)]
-    API --> VDB[(Qdrant Vector DB)]
-    
-    API -.->|Encola Tareas| Worker{ARQ Worker}
-    Cache -.->|Lee Tareas| Worker
-    
-    Worker --> Integrations((Módulo de Integraciones))
-    
-    Integrations --> Net[Red & DNS: RDAP, Certs]
-    Integrations --> Web[Web: Trafilatura, Wayback]
-    Integrations --> Threat[Threat Intel: Shodan, VirusTotal]
-    Integrations --> AI[LLM / Procesamiento Semántico]
-    
-    AI --> VDB
+graph LR
+    A[OSINT] --> Fusion
+    B[IMINT] --> Fusion
+    C[FININT] --> Fusion
+    D[DARKWEB] --> Fusion
+    E[CYBINT] --> Fusion
+    Fusion[Multi-INT Fusion Engine] --> G[Evaluación de Amenazas]
+    Fusion --> H[Perfil de Objetivo]
+    Fusion --> I[STIX 2.1 Bundle]
+    style Fusion fill:#1a1a1a,stroke:#00ff00,stroke-width:2px,color:#fff
 ```
 
----
-
-## 🔄 Flujo de Investigación (Pipeline)
-
+### Cadena de Custodia e Integridad (Audit Chain)
 ```mermaid
 sequenceDiagram
-    participant Analista
-    participant Atalaya API
-    participant Worker (Cola)
-    participant Motores OSINT
-    participant Qdrant (IA)
+    participant Op as Operador
+    participant Sys as Atalaya Core
+    participant DB as Audit Chain (Immutable)
     
-    Analista->>Atalaya API: Inicia investigación (ej. Dominio)
-    Atalaya API->>Worker: Encola tarea de recolección
-    Atalaya API-->>Analista: Estado: Procesando
-    
-    Worker->>Motores OSINT: Ejecuta consultas paralelas (DNS, Shodan, Web)
-    Motores OSINT-->>Worker: Retorna datos en crudo
-    
-    Worker->>Qdrant (IA): Vectoriza e indexa los hallazgos
-    Worker->>Atalaya API: Guarda reporte estructurado
-    Atalaya API-->>Analista: Reporte de Inteligencia Listo
+    Note over Op,DB: Flujo de Integridad de Grado Forense
+    Op->>Sys: Realiza acción (búsqueda/extracción)
+    Sys->>Sys: Genera hash del evento (SHA-256)
+    Sys->>DB: Registra evento + hash del bloque anterior
+    DB-->>Sys: ACK (Bloque Enlazado)
+    Sys-->>Op: Resultado con ID de Custodia Inmutable
 ```
 
 ---
 
-## 🚀 Instalación y Configuración
+## 🛡️ SEGURIDAD Y GOBERNANZA
 
-El proyecto está diseñado para ser desplegado fácilmente utilizando Docker y un entorno Makefile automatizado.
+Implementación de protocolos de seguridad militar para la protección de activos de inteligencia:
 
-### 📋 Requisitos Previos
+*   **Protección Anti-Brute Force:** Lockout progresivo a nivel de cuenta e IP.
+*   **Gestión de Sesiones:** Revocación de tokens vía JTI con Redis-backend.
+*   **Niveles de Clasificación:** Etiquetas de seguridad `TOP_SECRET`, `SECRET`, `CONFIDENTIAL`.
+*   **WAF Integrado:** Headers de seguridad estrictos (CSP, HSTS, Permissions-Policy).
+*   **STIX/TAXII 2.1:** Intercambio estandarizado de inteligencia de amenazas.
+*   **WebSocket Real-Time:** Alertas de amenazas y actualizaciones de trabajos en vivo.
 
-* Docker y Docker Compose (v2)
-* Python 3.11+ (para desarrollo local)
-* Node.js 18+ y npm (para desarrollo frontend)
-* Make (preinstalado en Linux/macOS)
+---
 
-### 🛠️ Paso 1: Clonar el Repositorio
+## 🚀 DESPLIEGUE OPERATIVO
 
+### Inicio Rápido
 ```bash
-git clone https://github.com/tu-usuario/atalaya-osint.git
-cd atalaya-osint
-```
+# Clonar repositorio
+git clone https://github.com/murdok1982/Atalaya-OSINT-AI-Platform
+cd Atalaya-OSINT-AI-Platform
 
-### ⚙️ Paso 2: Configuración del Entorno
-
-Copie el archivo de ejemplo para configurar las variables de entorno. Aquí podrá agregar las claves API de los servicios opcionales si dispone de ellas.
-
-```bash
+# Preparar entorno
 cp .env.example .env
-```
-
-Edite el archivo `.env` según sus necesidades. Las integraciones "builtin" (como Búsqueda Web, DNS, Extracción de Documentos) funcionarán sin configuración adicional.
-Para integraciones avanzadas (Shodan, VirusTotal, Hunter.io), añada sus APIs en las variables correspondientes.
-
-Puede generar claves seguras para la aplicación ejecutando:
-```bash
 make generate-keys
+
+# Lanzar Stack Completo (Kafka, Neo4j, Redis, PG, Monitoring)
+make docker-full
 ```
 
-### 🐳 Paso 3: Despliegue con Docker (Recomendado)
-
-Para levantar todos los servicios (Base de datos, Frontend, Backend, Redis, Worker, Qdrant):
-
-```bash
-make docker-up
-```
-
-*El sistema tardará unos momentos en descargar las imágenes de Postgres, Redis y Qdrant la primera vez.*
-
-### 💾 Paso 4: Inicializar la Base de Datos
-
-Una vez que los contenedores estén corriendo, ejecute las migraciones de la base de datos y cargue los datos semilla (usuario administrador por defecto):
-
-```bash
-make migrate
-make seed
-```
+### Servicios Disponibles
+*   **Command Center (Frontend):** `http://localhost:3000`
+*   **Intelligence API:** `http://localhost:8000/docs`
+*   **Observability (Grafana):** `http://localhost:3001`
+*   **Traffic Monitor (Prometheus):** `http://localhost:9091`
 
 ---
 
-## 🖥️ Uso y Acceso
+## 🛠️ OBSERVABILIDAD Y MÉTRICAS
 
-Una vez instalado, Atalaya OSINT expone los siguientes servicios:
-
-* **Panel Frontend (Next.js):** [http://localhost:3000](http://localhost:3000)
-  * Interfaz de usuario para lanzar y visualizar investigaciones.
-* **API Backend (FastAPI):** [http://localhost:8000](http://localhost:8000)
-  * Punto de acceso principal para interactuar programáticamente con el sistema.
-* **Documentación Interactiva de la API (Swagger UI):** [http://localhost:8000/docs](http://localhost:8000/docs)
-  * Explora todos los endpoints disponibles y pruébalos directamente desde el navegador.
-
-### Gestión de Servicios (Comandos Make útiles)
-
-Atalaya incluye comandos útiles para administrar el ciclo de vida de la aplicación:
-
-* `make docker-down`: Apaga todos los contenedores.
-* `make docker-logs`: Muestra en tiempo real los registros (logs) de todos los microservicios.
-* `make reset-db`: **Precaución:** Elimina y recrea la base de datos desde cero.
-* `make dev`: Levanta el entorno en modo desarrollo nativo (sin dockerizar backend/frontend).
+Atalaya monitoriza cada operación mediante un stack completo de observabilidad:
+*   **Métricas de API:** Latencia, Tasa de errores, Rendimiento de Endpoints.
+*   **Estado del Worker:** Tasa de éxito de jobs, tiempos de procesamiento INT.
+*   **Seguridad:** Intentos de login fallidos, bloqueos de IP en tiempo real.
 
 ---
 
-## 🧩 Integraciones Disponibles
+## 🤝 DONACIONES (SUPPORT THE MISSION)
 
-El catálogo de Atalaya se divide en dos niveles de integración:
+Si este proyecto te ha sido útil y deseas apoyar su desarrollo continuo para mantenerlo en la vanguardia de la tecnología OSINT, puedes realizar una donación de forma segura:
 
-### 🟢 Nativas (No requieren API Key)
-* **Red:** DNS Resolver, RDAP / WHOIS, Geolocalización IP.
-* **Certificados:** Certificate Transparency (crt.sh).
-* **Web:** Web Fetch (extracción de texto), Búsqueda Web (DuckDuckGo), Wayback Machine.
-* **Social / Archivos:** Perfiles públicos de GitHub y Reddit, Extractor de metadatos de documentos e imágenes.
-
-### 🔵 Premium / Opcionales (Requieren API Key en el `.env`)
-* **Inteligencia de Amenazas:** Shodan, VirusTotal, URLScan.io, Censys, SecurityTrails.
-* **OSINT Avanzado:** Hunter.io (Emails), Have I Been Pwned (Brechas), IPinfo (Geolocalización avanzada).
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  ₿  Bitcoin Donation Address  ₿   ┃
+┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫
+┃                                   ┃
+┃   bc1qqphwht25vjzlptwzjyjt3sex    ┃
+┃   7e3p8twn390fkw                  ┃
+┃                                   ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 
 ---
+
+## 📜 LICENCIA Y TÉRMINOS
+Este software se entrega "tal cual" bajo licencia MIT. El uso de esta herramienta para actividades ilegales es responsabilidad exclusiva del usuario. Atalaya está diseñado para fines de investigación, defensa y análisis legítimo.
+
 <div align="center">
-  <i>Desarrollado para potenciar investigaciones OSINT con Inteligencia Artificial.</i>
+  <p><b>ATALAYA v2.0 - DEFENSE BY INTELLIGENCE</b></p>
+  <p>© 2024 Murdok & Atalaya OSINT Community</p>
 </div>
