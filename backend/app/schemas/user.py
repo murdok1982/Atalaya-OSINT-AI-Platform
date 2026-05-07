@@ -92,6 +92,33 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=256)
 
 
+class LoginResponse(BaseModel):
+    """Login response. When ``mfa_required`` is true, ``mfa_ticket`` is set and
+    tokens are absent — the client must call ``POST /auth/mfa/verify`` next.
+    """
+
+    mfa_required: bool = False
+    mfa_ticket: str | None = None
+    access_token: str | None = None
+    refresh_token: str | None = None
+    token_type: str = "bearer"
+    expires_in: int = 0
+
+
+class MfaSetupResponse(BaseModel):
+    secret: str
+    otpauth_uri: str
+
+
+class MfaEnableRequest(BaseModel):
+    code: str = Field(min_length=6, max_length=8)
+
+
+class MfaVerifyRequest(BaseModel):
+    mfa_ticket: str = Field(min_length=20, max_length=4096)
+    code: str = Field(min_length=6, max_length=8)
+
+
 class PasswordChange(BaseModel):
     current_password: str = Field(min_length=1, max_length=256)
     new_password: str = Field(min_length=12, max_length=256)

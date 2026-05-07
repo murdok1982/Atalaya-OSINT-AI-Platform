@@ -25,12 +25,12 @@ export default function LoginPage() {
     try {
       const res = await api.login(username, password)
       if (res.mfa_required) {
-        // TODO(backend): align ticket field name; we forward whatever was sent.
         setMfaTicket(res.mfa_ticket)
         setStep('mfa')
         toast.message('Multi-factor authentication required')
         return
       }
+      if (!res.access_token) throw new Error('Server returned no access token')
       setAccessToken(res.access_token, res.refresh_token)
       router.push('/')
     } catch (err) {
@@ -46,13 +46,15 @@ export default function LoginPage() {
       toast.error('Enter the 6-digit code from your authenticator')
       return
     }
+    if (!mfaTicket) {
+      toast.error('Session expired — please sign in again')
+      setStep('credentials')
+      return
+    }
     setLoading(true)
     try {
-      const res = await api.verifyMfa({
-        username,
-        code: mfaCode,
-        ticket: mfaTicket,
-      })
+      const res = await api.verifyMfa({ mfa_ticket: mfaTicket, code: mfaCode })
+      if (!res.access_token) throw new Error('Server returned no access token')
       setAccessToken(res.access_token, res.refresh_token)
       router.push('/')
     } catch (err) {

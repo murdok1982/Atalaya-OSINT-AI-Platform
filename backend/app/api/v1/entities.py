@@ -6,11 +6,26 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import DBSession, require_scope
+from app.api.deps import DBSession, assert_resource_access, require_scope
+from app.models.case import Case
 from app.models.entity import Entity
 from app.schemas.entity import EntityCreate, EntityMergeRequest, EntityResponse, EntityUpdate
 
 router = APIRouter()
+
+
+async def _assert_case_access(db: AsyncSession, case_id: str, user) -> Case:
+    case = (
+        await db.execute(select(Case).where(Case.id == case_id, Case.deleted.is_(False)))
+    ).scalar_one_or_none()
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    assert_resource_access(
+        user,
+        owner_id=case.operator_id,
+        classification=getattr(case, "classification", "UNCLASSIFIED"),
+    )
+    return case
 
 
 @router.get("", response_model=list[EntityResponse])
@@ -22,7 +37,19 @@ async def list_entities(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
 ) -> list[EntityResponse]:
-    q = select(Entity).where(Entity.merged_into_id.is_(None))
+    if case_id:
+        await _assert_case_access(db, case_id, user)
+
+    q = (
+        select(Entity)
+        .join(Case, Case.id == Entity.case_id)
+        .where(Entity.merged_into_id.is_(None), Case.deleted.is_(False))
+    )
+    is_admin = getattr(user, "is_superuser", False) or "admin" in (
+        getattr(user, "scopes", []) or []
+    )
+    if not is_admin:
+        q = q.where(Case.operator_id == user.id)  # type: ignore[attr-defined]
     if case_id:
         q = q.where(Entity.case_id == case_id)
     if entity_type:
@@ -38,6 +65,7 @@ async def create_entity(
     db: DBSession,
     user: Annotated[object, Depends(require_scope("write:cases"))],
 ) -> EntityResponse:
+    await _assert_case_access(db, body.case_id, user)
     entity = Entity(**body.model_dump())
     db.add(entity)
     await db.commit()
@@ -51,7 +79,7 @@ async def get_entity(
     db: DBSession,
     user: Annotated[object, Depends(require_scope("read:cases"))],
 ) -> EntityResponse:
-    entity = await _get_or_404(db, entity_id)
+    entity = await _get_or_404(db, entity_id, user)
     return EntityResponse.model_validate(entity)
 
 
@@ -62,7 +90,7 @@ async def update_entity(
     db: DBSession,
     user: Annotated[object, Depends(require_scope("write:cases"))],
 ) -> EntityResponse:
-    entity = await _get_or_404(db, entity_id)
+    entity = await _get_or_404(db, entity_id, user)
     for field, value in body.model_dump(exclude_none=True).items():
         setattr(entity, field, value)
     await db.commit()
@@ -77,8 +105,8 @@ async def merge_entity(
     db: DBSession,
     user: Annotated[object, Depends(require_scope("write:cases"))],
 ) -> None:
-    entity = await _get_or_404(db, entity_id)
-    target = await _get_or_404(db, body.target_entity_id)
+    entity = await _get_or_404(db, entity_id, user)
+    target = await _get_or_404(db, body.target_entity_id, user)
     if entity.case_id != target.case_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Entities must be in the same case")
     entity.merged_into_id = target.id
@@ -91,6 +119,7 @@ async def get_entity_graph(
     db: DBSession,
     user: Annotated[object, Depends(require_scope("read:cases"))],
 ) -> dict:
+    await _assert_case_access(db, case_id, user)
     result = await db.execute(select(Entity).where(Entity.case_id == case_id))
     entities = result.scalars().all()
     nodes = [
@@ -112,9 +141,10 @@ async def get_entity_graph(
     return {"nodes": nodes, "edges": edges}
 
 
-async def _get_or_404(db: AsyncSession, entity_id: str) -> Entity:
+async def _get_or_404(db: AsyncSession, entity_id: str, user) -> Entity:
     result = await db.execute(select(Entity).where(Entity.id == entity_id))
     entity = result.scalar_one_or_none()
     if not entity:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Entity not found")
+    await _assert_case_access(db, entity.case_id, user)
     return entity

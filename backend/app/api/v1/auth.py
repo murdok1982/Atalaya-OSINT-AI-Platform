@@ -9,6 +9,14 @@ from app.api.deps import AdminUser, CurrentUser, DBSession, get_token_blacklist
 from app.core.audit import AuditAction, AuditContext, log_audit
 from app.core.bruteforce import BruteForceProtector
 from app.core.events_bus import EventType, AtalayaEvent, event_bus
+from app.core.mfa import (
+    encrypt_secret,
+    generate_secret,
+    issue_mfa_ticket,
+    provisioning_uri,
+    verify_code,
+    verify_mfa_ticket,
+)
 from app.core.security import (
     create_token_pair,
     get_password_hash,
@@ -17,17 +25,78 @@ from app.core.security import (
     verify_token,
 )
 from app.models.user import User
-from app.schemas.user import LoginRequest, PasswordChange, Token, TokenRefresh, UserResponse, UserCreate
+from app.schemas.user import (
+    LoginRequest,
+    LoginResponse,
+    MfaEnableRequest,
+    MfaSetupResponse,
+    MfaVerifyRequest,
+    PasswordChange,
+    Token,
+    TokenRefresh,
+    UserCreate,
+    UserResponse,
+)
 
 router = APIRouter()
 
 
-@router.post("/login", response_model=Token)
+async def _issue_tokens_for(user: User, request: Request, db, client_ip: str) -> LoginResponse:
+    """Common path: emit access+refresh tokens, log audit, publish event."""
+    await db.execute(
+        update(User)
+        .where(User.id == user.id)
+        .values(last_login=datetime.now(timezone.utc), last_ip=client_ip)
+    )
+    await db.commit()
+
+    BruteForceProtector.record_success(user.username, client_ip)
+
+    token_pair = create_token_pair(
+        user_id=user.id,
+        scopes=user.scopes,
+        classification=getattr(user, "classification", "UNCLASSIFIED"),
+    )
+
+    await log_audit(
+        AuditContext(
+            user_id=user.id,
+            action=AuditAction.LOGIN,
+            resource_type="user",
+            resource_id=user.id,
+            ip_address=client_ip,
+            request_id=getattr(request.state, "request_id", ""),
+            success=True,
+            details={
+                "session_id": token_pair.session_id,
+                "mfa": bool(getattr(user, "mfa_enabled", False)),
+            },
+        ),
+        db=db,
+    )
+
+    await event_bus.publish(AtalayaEvent(
+        event_type=EventType.USER_LOGIN,
+        source="auth-service",
+        data={"user_id": user.id, "username": user.username, "ip": client_ip},
+        tenant_id=getattr(request.state, "tenant_id", ""),
+    ))
+
+    return LoginResponse(
+        mfa_required=False,
+        access_token=token_pair.access_token,
+        refresh_token=token_pair.refresh_token,
+        token_type=token_pair.token_type,
+        expires_in=token_pair.expires_in,
+    )
+
+
+@router.post("/login", response_model=LoginResponse)
 async def login(
     request: Request,
     body: LoginRequest,
     db: DBSession,
-) -> Token:
+) -> LoginResponse:
     client_ip = request.client.host if request.client else "unknown"
 
     if BruteForceProtector.is_locked(body.username):
@@ -65,50 +134,155 @@ async def login(
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is deactivated")
 
-    await db.execute(
-        update(User)
-        .where(User.id == user.id)
-        .values(
-            last_login=datetime.now(timezone.utc),
-            last_ip=client_ip,
+    if getattr(user, "mfa_enabled", False) and getattr(user, "mfa_secret", None):
+        ticket = issue_mfa_ticket(user.id, scopes=user.scopes)
+        await log_audit(
+            AuditContext(
+                user_id=user.id,
+                action=AuditAction.LOGIN,
+                resource_type="user",
+                resource_id=user.id,
+                ip_address=client_ip,
+                request_id=getattr(request.state, "request_id", ""),
+                success=True,
+                details={"step": "password_ok_mfa_pending"},
+            ),
+            db=db,
         )
+        return LoginResponse(mfa_required=True, mfa_ticket=ticket)
+
+    return await _issue_tokens_for(user, request, db, client_ip)
+
+
+@router.post("/mfa/verify", response_model=LoginResponse)
+async def mfa_verify(
+    request: Request,
+    body: MfaVerifyRequest,
+    db: DBSession,
+) -> LoginResponse:
+    """Second leg of login: exchange ``mfa_ticket`` + TOTP for an access token."""
+    client_ip = request.client.host if request.client else "unknown"
+    try:
+        payload = verify_mfa_ticket(body.mfa_ticket)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired MFA ticket",
+        )
+
+    user = (
+        await db.execute(select(User).where(User.id == payload["sub"]))
+    ).scalar_one_or_none()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    if not getattr(user, "mfa_enabled", False) or not getattr(user, "mfa_secret", None):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="MFA not enabled for user")
+
+    if not verify_code(user.mfa_secret, body.code):
+        BruteForceProtector.record_failure(user.username, client_ip)
+        await log_audit(
+            AuditContext(
+                user_id=user.id,
+                action=AuditAction.LOGIN,
+                resource_type="user",
+                resource_id=user.id,
+                ip_address=client_ip,
+                request_id=getattr(request.state, "request_id", ""),
+                success=False,
+                error_message="Invalid MFA code",
+            ),
+            db=db,
+        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid MFA code")
+
+    return await _issue_tokens_for(user, request, db, client_ip)
+
+
+@router.post("/mfa/setup", response_model=MfaSetupResponse)
+async def mfa_setup(user: CurrentUser) -> MfaSetupResponse:
+    """Generate a fresh TOTP secret and otpauth URI. The secret is NOT yet
+    persisted — call ``/mfa/enable`` with a valid code from the authenticator
+    app to bind it to the account.
+    """
+    secret = generate_secret()
+    return MfaSetupResponse(
+        secret=secret,
+        otpauth_uri=provisioning_uri(secret, account=user.username),
+    )
+
+
+@router.post("/mfa/enable", status_code=status.HTTP_204_NO_CONTENT)
+async def mfa_enable(
+    request: Request,
+    body: MfaEnableRequest,
+    user: CurrentUser,
+    db: DBSession,
+) -> None:
+    """Bind a previously-generated TOTP secret to the user.
+
+    Expects ``X-MFA-Secret`` header (plaintext from /mfa/setup) plus a code that
+    matches it. Stores the secret encrypted at rest.
+    """
+    raw_secret = request.headers.get("x-mfa-secret", "").strip()
+    if not raw_secret or not body.code:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing secret or code")
+
+    encrypted = encrypt_secret(raw_secret)
+    if not verify_code(encrypted, body.code):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Code does not match secret")
+
+    await db.execute(
+        update(User).where(User.id == user.id).values(mfa_enabled=True, mfa_secret=encrypted)
     )
     await db.commit()
-
-    BruteForceProtector.record_success(body.username, client_ip)
-
-    token_pair = create_token_pair(
-        user_id=user.id,
-        scopes=user.scopes,
-        classification=getattr(user, "classification", "UNCLASSIFIED"),
-    )
 
     await log_audit(
         AuditContext(
             user_id=user.id,
-            action=AuditAction.LOGIN,
+            action=AuditAction.UPDATE,
             resource_type="user",
             resource_id=user.id,
-            ip_address=client_ip,
+            ip_address=request.client.host if request.client else "",
             request_id=getattr(request.state, "request_id", ""),
-            success=True,
-            details={"session_id": token_pair.session_id},
+            details={"mfa": "enabled"},
         ),
         db=db,
     )
 
-    await event_bus.publish(AtalayaEvent(
-        event_type=EventType.USER_LOGIN,
-        source="auth-service",
-        data={"user_id": user.id, "username": user.username, "ip": client_ip},
-        tenant_id=getattr(request.state, "tenant_id", ""),
-    ))
 
-    return Token(
-        access_token=token_pair.access_token,
-        refresh_token=token_pair.refresh_token,
-        token_type=token_pair.token_type,
-        expires_in=token_pair.expires_in,
+@router.post("/mfa/disable", status_code=status.HTTP_204_NO_CONTENT)
+async def mfa_disable(
+    request: Request,
+    body: MfaEnableRequest,
+    user: CurrentUser,
+    db: DBSession,
+) -> None:
+    """Disable MFA for the current user. Requires a valid current code as proof
+    of possession (prevents an attacker with a stolen access token from turning
+    MFA off silently).
+    """
+    if not getattr(user, "mfa_enabled", False) or not getattr(user, "mfa_secret", None):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="MFA not enabled")
+
+    if not verify_code(user.mfa_secret, body.code):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid MFA code")
+
+    await db.execute(
+        update(User).where(User.id == user.id).values(mfa_enabled=False, mfa_secret=None)
+    )
+    await db.commit()
+
+    await log_audit(
+        AuditContext(
+            user_id=user.id,
+            action=AuditAction.UPDATE,
+            resource_type="user",
+            resource_id=user.id,
+            ip_address=request.client.host if request.client else "",
+            request_id=getattr(request.state, "request_id", ""),
+            details={"mfa": "disabled"},
+        ),
+        db=db,
     )
 
 
@@ -152,16 +326,34 @@ async def logout(
     request: Request,
     user: CurrentUser,
     db: DBSession,
+    body: TokenRefresh | None = None,
 ) -> None:
-    from fastapi import Header
+    """Revoke the current access token and (if supplied) the paired refresh.
+
+    Always returns 204 — token parsing failures are silenced to avoid leaking
+    information about token validity to a logged-out client.
+    """
+    blacklist = await get_token_blacklist()
 
     auth_header = request.headers.get("authorization", "")
+    sid = ""
     if auth_header.startswith("Bearer "):
         access_token = auth_header[7:]
         try:
             payload = verify_token(access_token)
-            blacklist = await get_token_blacklist()
+            sid = payload.sid or ""
             await blacklist.add(payload.jti, payload.exp.timestamp() if payload.exp else 0)
+        except ValueError:
+            pass
+
+    # Blacklist the refresh token as well when the client provides it.
+    if body and body.refresh_token:
+        try:
+            rpayload = verify_token(body.refresh_token)
+            if rpayload.type == "refresh" and rpayload.sub == user.id:
+                await blacklist.add(
+                    rpayload.jti, rpayload.exp.timestamp() if rpayload.exp else 0
+                )
         except ValueError:
             pass
 
@@ -173,6 +365,7 @@ async def logout(
             resource_id=user.id,
             ip_address=request.client.host if request.client else "",
             request_id=getattr(request.state, "request_id", ""),
+            details={"session_id": sid} if sid else {},
         ),
         db=db,
     )

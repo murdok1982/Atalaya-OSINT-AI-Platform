@@ -44,13 +44,19 @@ function handleUnauthorized(): void {
 // ---------------------------------------------------------------------------
 
 export interface LoginResponse {
-  access_token: string
+  access_token?: string
   refresh_token?: string
-  token_type: string
+  token_type?: string
+  expires_in?: number
   /** When true, the client must present a TOTP code via /auth/mfa/verify. */
   mfa_required?: boolean
-  /** Opaque ticket used to bind subsequent MFA verify call (when supported). */
+  /** Short-lived JWT proving password step succeeded. */
   mfa_ticket?: string
+}
+
+export interface MfaSetupResponse {
+  secret: string
+  otpauth_uri: string
 }
 
 export interface MeResponse {
@@ -130,14 +136,39 @@ export const api = {
   // Auth
   login: (username: string, password: string) =>
     request<LoginResponse>('POST', '/auth/login', { username, password }),
-  /**
-   * Verify TOTP code returned after login when mfa_required = true.
-   * TODO(backend): confirm endpoint shape; currently /auth/mfa/verify with
-   *                { username, code, ticket? } returning a normal LoginResponse.
-   */
-  verifyMfa: (payload: { username: string; code: string; ticket?: string }) =>
+  /** Second leg of login when ``mfa_required`` is true. */
+  verifyMfa: (payload: { mfa_ticket: string; code: string }) =>
     request<LoginResponse>('POST', '/auth/mfa/verify', payload),
-  logout: () => clearAccessToken(),
+  /** Returns a fresh secret + otpauth URI; call /auth/mfa/enable to bind it. */
+  setupMfa: () => request<MfaSetupResponse>('POST', '/auth/mfa/setup'),
+  /** Bind a previously-generated secret. Sends X-MFA-Secret with the plaintext. */
+  enableMfa: async (secret: string, code: string) => {
+    const res = await fetch(`${API_BASE}/auth/mfa/enable`, {
+      method: 'POST',
+      headers: {
+        ...getAuthHeader(),
+        'Content-Type': 'application/json',
+        'X-MFA-Secret': secret,
+      },
+      body: JSON.stringify({ code }),
+    })
+    if (res.status === 401) {
+      handleUnauthorized()
+      throw new Error('Unauthorized')
+    }
+    if (!res.ok) throw new Error(await res.text())
+  },
+  disableMfa: (code: string) =>
+    request<void>('POST', '/auth/mfa/disable', { code }),
+  logout: async () => {
+    const refresh = typeof window !== 'undefined' ? sessionStorage.getItem(REFRESH_KEY) : null
+    try {
+      await request<void>('POST', '/auth/logout', refresh ? { refresh_token: refresh } : undefined)
+    } catch {
+      /* swallow — UI flow proceeds regardless */
+    }
+    clearAccessToken()
+  },
   me: () => fetcher<MeResponse>('/auth/me'),
 
   // Cases

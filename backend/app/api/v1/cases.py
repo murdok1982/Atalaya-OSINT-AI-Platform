@@ -6,7 +6,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import CurrentUser, DBSession, require_scope
+from app.api.deps import (
+    CurrentUser,
+    DBSession,
+    assert_resource_access,
+    require_scope,
+    user_can_access_classification,
+)
 from app.models.case import Case, CasePriority, CaseStatus
 from app.models.entity import Entity
 from app.models.evidence import Evidence
@@ -53,6 +59,11 @@ async def list_cases(
         .outerjoin(job_count_sq, job_count_sq.c.case_id == Case.id)
         .where(Case.deleted.is_(False))
     )
+    is_admin = getattr(user, "is_superuser", False) or "admin" in (
+        getattr(user, "scopes", []) or []
+    )
+    if not is_admin:
+        q = q.where(Case.operator_id == user.id)  # type: ignore[attr-defined]
     if status_filter:
         q = q.where(Case.status == status_filter)
     if priority_filter:
@@ -62,7 +73,10 @@ async def list_cases(
     rows = (await db.execute(q)).all()
     items = []
     for row in rows:
-        item = CaseListItem.model_validate(row.Case)
+        case_obj = row.Case
+        if not user_can_access_classification(user, getattr(case_obj, "classification", None)):  # type: ignore[arg-type]
+            continue
+        item = CaseListItem.model_validate(case_obj)
         item.entity_count = row.entity_count
         item.evidence_count = row.evidence_count
         item.job_count = row.job_count
@@ -90,7 +104,7 @@ async def get_case(
     db: DBSession,
     user: Annotated[object, Depends(require_scope("read:cases"))],
 ) -> CaseResponse:
-    case = await _get_or_404(db, case_id)
+    case = await _get_or_404(db, case_id, user)  # type: ignore[arg-type]
     ec = await db.scalar(select(func.count(Entity.id)).where(Entity.case_id == case_id)) or 0
     evc = await db.scalar(select(func.count(Evidence.id)).where(Evidence.case_id == case_id)) or 0
     jc = await db.scalar(select(func.count(Job.id)).where(Job.case_id == case_id)) or 0
@@ -108,8 +122,16 @@ async def update_case(
     db: DBSession,
     user: Annotated[object, Depends(require_scope("write:cases"))],
 ) -> CaseResponse:
-    case = await _get_or_404(db, case_id)
-    for field, value in body.model_dump(exclude_none=True).items():
+    case = await _get_or_404(db, case_id, user)  # type: ignore[arg-type]
+    update_data = body.model_dump(exclude_none=True)
+    # Mass-assignment guard: only admins can change ownership/classification.
+    is_admin = getattr(user, "is_superuser", False) or "admin" in (
+        getattr(user, "scopes", []) or []
+    )
+    if not is_admin:
+        for protected in ("operator_id", "classification", "deleted"):
+            update_data.pop(protected, None)
+    for field, value in update_data.items():
         setattr(case, field, value)
     await db.commit()
     await db.refresh(case)
@@ -123,7 +145,7 @@ async def update_case_status(
     db: DBSession,
     user: Annotated[object, Depends(require_scope("write:cases"))],
 ) -> CaseResponse:
-    case = await _get_or_404(db, case_id)
+    case = await _get_or_404(db, case_id, user)  # type: ignore[arg-type]
     case.status = body.status
     await db.commit()
     await db.refresh(case)
@@ -136,14 +158,19 @@ async def delete_case(
     db: DBSession,
     user: Annotated[object, Depends(require_scope("admin"))],
 ) -> None:
-    case = await _get_or_404(db, case_id)
+    case = await _get_or_404(db, case_id, user)  # type: ignore[arg-type]
     case.deleted = True
     await db.commit()
 
 
-async def _get_or_404(db: AsyncSession, case_id: str) -> Case:
+async def _get_or_404(db: AsyncSession, case_id: str, user) -> Case:
     result = await db.execute(select(Case).where(Case.id == case_id, Case.deleted.is_(False)))
     case = result.scalar_one_or_none()
     if not case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    assert_resource_access(
+        user,
+        owner_id=case.operator_id,
+        classification=getattr(case, "classification", "UNCLASSIFIED"),
+    )
     return case

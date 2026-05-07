@@ -8,11 +8,26 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import CurrentUser, DBSession, require_scope
+from app.api.deps import DBSession, assert_resource_access, require_scope
+from app.models.case import Case
 from app.models.job import Job, JobStatus
 from app.schemas.job import JobCreate, JobListItem, JobResponse
 
 router = APIRouter()
+
+
+async def _assert_case_access(db: AsyncSession, case_id: str, user) -> Case:
+    case = (
+        await db.execute(select(Case).where(Case.id == case_id, Case.deleted.is_(False)))
+    ).scalar_one_or_none()
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    assert_resource_access(
+        user,
+        owner_id=case.operator_id,
+        classification=getattr(case, "classification", "UNCLASSIFIED"),
+    )
+    return case
 
 
 @router.get("", response_model=list[JobListItem])
@@ -24,7 +39,19 @@ async def list_jobs(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
 ) -> list[JobListItem]:
-    q = select(Job)
+    if case_id:
+        await _assert_case_access(db, case_id, user)
+
+    q = select(Job).outerjoin(Case, Case.id == Job.case_id)
+    is_admin = getattr(user, "is_superuser", False) or "admin" in (
+        getattr(user, "scopes", []) or []
+    )
+    if not is_admin:
+        # Either job's case belongs to user OR job has no case and user created it.
+        q = q.where(
+            (Case.operator_id == user.id)  # type: ignore[attr-defined]
+            | ((Job.case_id.is_(None)) & (Job.created_by == user.id))  # type: ignore[attr-defined]
+        )
     if case_id:
         q = q.where(Job.case_id == case_id)
     if status_filter:
@@ -40,6 +67,9 @@ async def create_job(
     db: DBSession,
     user: Annotated[object, Depends(require_scope("execute:jobs"))],
 ) -> JobResponse:
+    if body.case_id:
+        await _assert_case_access(db, body.case_id, user)
+
     job = Job(
         id=str(uuid.uuid4()),
         case_id=body.case_id,
@@ -73,7 +103,7 @@ async def get_job(
     db: DBSession,
     user: Annotated[object, Depends(require_scope("read:cases"))],
 ) -> JobResponse:
-    job = await _get_or_404(db, job_id)
+    job = await _get_or_404(db, job_id, user)
     return JobResponse.model_validate(job)
 
 
@@ -83,16 +113,20 @@ async def cancel_job(
     db: DBSession,
     user: Annotated[object, Depends(require_scope("execute:jobs"))],
 ) -> None:
-    job = await _get_or_404(db, job_id)
+    job = await _get_or_404(db, job_id, user)
     if job.status not in (JobStatus.PENDING, JobStatus.QUEUED, JobStatus.RUNNING):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Job cannot be cancelled")
     job.status = JobStatus.CANCELLED
     await db.commit()
 
 
-async def _get_or_404(db: AsyncSession, job_id: str) -> Job:
+async def _get_or_404(db: AsyncSession, job_id: str, user) -> Job:
     result = await db.execute(select(Job).where(Job.id == job_id))
     job = result.scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    if job.case_id:
+        await _assert_case_access(db, job.case_id, user)
+    else:
+        assert_resource_access(user, owner_id=job.created_by, classification="UNCLASSIFIED")
     return job

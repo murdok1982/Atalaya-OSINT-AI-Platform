@@ -27,5 +27,7 @@ class User(BaseModel):
     phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     department: Mapped[str | None] = mapped_column(String(128), nullable=True)
     clearance_level: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    mfa_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     cases: Mapped[list["Case"]] = relationship("Case", back_populates="operator", lazy="dynamic")  # type: ignore[name-defined]  # noqa: F821

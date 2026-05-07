@@ -76,14 +76,59 @@ def require_scope(scope: str):
     return _check
 
 
+_CLEARANCE_ORDER = ["UNCLASSIFIED", "CUI", "RESTRICTED", "CONFIDENTIAL", "SECRET", "TOP_SECRET"]
+
+
+def _clearance_index(level: str | None) -> int:
+    if not level:
+        return 0
+    try:
+        return _CLEARANCE_ORDER.index(level)
+    except ValueError:
+        return 0
+
+
+def user_can_access_classification(user: User, resource_classification: str | None) -> bool:
+    """True iff the user's clearance is greater-or-equal to the resource's level."""
+    if getattr(user, "is_superuser", False):
+        return True
+    return _clearance_index(getattr(user, "classification", "UNCLASSIFIED")) >= _clearance_index(
+        resource_classification
+    )
+
+
+def assert_resource_access(
+    user: User,
+    *,
+    owner_id: str | None,
+    classification: str | None = "UNCLASSIFIED",
+) -> None:
+    """Centralized BOLA + clearance gate.
+
+    Raises 403 if either:
+      - the user is not the resource owner (and not admin/superuser), or
+      - the user's clearance is below the resource's classification.
+    Raises 404-style HTTPException is the caller's choice — this helper does not
+    leak existence information beyond ``Forbidden``.
+    """
+    is_admin = getattr(user, "is_superuser", False) or "admin" in (user.scopes or [])
+    if not is_admin and owner_id and owner_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Resource does not belong to caller",
+        )
+    if not user_can_access_classification(user, classification):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient clearance for resource classification",
+        )
+
+
 def require_classification(min_level: str):
-    levels = ["UNCLASSIFIED", "CUI", "CONFIDENTIAL", "SECRET", "TOP_SECRET"]
-    min_idx = levels.index(min_level) if min_level in levels else 0
+    min_idx = _clearance_index(min_level)
 
     async def _check(user: Annotated[User, Depends(get_current_active_user)]) -> User:
-        user_level = getattr(user, "classification", "UNCLASSIFIED")
-        user_idx = levels.index(user_level) if user_level in levels else 0
-        if user_idx < min_idx:
+        if _clearance_index(getattr(user, "classification", "UNCLASSIFIED")) < min_idx:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Classification '{min_level}' or higher required",

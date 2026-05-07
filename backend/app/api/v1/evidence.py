@@ -12,10 +12,26 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import DBSession, require_scope
+from app.api.deps import DBSession, assert_resource_access, require_scope
 from app.core.config import settings
+from app.models.case import Case
 from app.models.evidence import Evidence
 from app.schemas.evidence import EvidenceCreate, EvidenceListItem, EvidenceResponse
+
+
+async def _assert_case_access(db: AsyncSession, case_id: str, user) -> Case:
+    """Fetch the parent case and enforce ownership + clearance via shared helper."""
+    case = (
+        await db.execute(select(Case).where(Case.id == case_id, Case.deleted.is_(False)))
+    ).scalar_one_or_none()
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    assert_resource_access(
+        user,
+        owner_id=case.operator_id,
+        classification=getattr(case, "classification", "UNCLASSIFIED"),
+    )
+    return case
 
 router = APIRouter()
 
@@ -64,7 +80,15 @@ async def list_evidence(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
 ) -> list[EvidenceListItem]:
-    q = select(Evidence)
+    if case_id:
+        await _assert_case_access(db, case_id, user)
+
+    q = select(Evidence).join(Case, Case.id == Evidence.case_id).where(Case.deleted.is_(False))
+    is_admin = getattr(user, "is_superuser", False) or "admin" in (
+        getattr(user, "scopes", []) or []
+    )
+    if not is_admin:
+        q = q.where(Case.operator_id == user.id)  # type: ignore[attr-defined]
     if case_id:
         q = q.where(Evidence.case_id == case_id)
     if entity_id:
@@ -82,6 +106,8 @@ async def create_evidence(
     db: DBSession,
     user: Annotated[object, Depends(require_scope("write:cases"))],
 ) -> EvidenceResponse:
+    await _assert_case_access(db, body.case_id, user)
+
     content_hash = ""
     if body.content_text:
         content_hash = hashlib.sha256(body.content_text.encode()).hexdigest()
@@ -105,6 +131,9 @@ async def upload_evidence(
     user: Annotated[object, Depends(require_scope("write:cases"))],
     file: UploadFile = File(...),
 ) -> EvidenceResponse:
+    safe_case_id = _validate_case_id(case_id)
+    await _assert_case_access(db, safe_case_id, user)
+
     if file.size and file.size > settings.max_file_size_bytes:
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large")
 
@@ -114,7 +143,6 @@ async def upload_evidence(
 
     content_hash = hashlib.sha256(content).hexdigest()
     ev_id = str(uuid.uuid4())
-    safe_case_id = _validate_case_id(case_id)
     safe_name = _safe_filename(file.filename)
 
     storage_root = os.path.realpath(settings.EVIDENCE_STORAGE_PATH)
@@ -154,7 +182,7 @@ async def get_evidence(
     db: DBSession,
     user: Annotated[object, Depends(require_scope("read:cases"))],
 ) -> EvidenceResponse:
-    ev = await _get_or_404(db, evidence_id)
+    ev = await _get_or_404(db, evidence_id, user)
     return EvidenceResponse.model_validate(ev)
 
 
@@ -170,7 +198,7 @@ async def get_evidence_custody(
     from app.models.intel_records import ChainOfCustodyRecord
     from sqlalchemy import select as _select
 
-    ev = await _get_or_404(db, evidence_id)
+    ev = await _get_or_404(db, evidence_id, user)
 
     integrity_ok = True
     recomputed_hash = ev.content_hash
@@ -208,7 +236,7 @@ async def get_evidence_content(
     db: DBSession,
     user: Annotated[object, Depends(require_scope("read:cases"))],
 ) -> FileResponse:
-    ev = await _get_or_404(db, evidence_id)
+    ev = await _get_or_404(db, evidence_id, user)
     if not ev.content_file_path or not os.path.exists(ev.content_file_path):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
     # Confine reads to the configured evidence storage root
@@ -225,16 +253,17 @@ async def delete_evidence(
     db: DBSession,
     user: Annotated[object, Depends(require_scope("admin"))],
 ) -> None:
-    ev = await _get_or_404(db, evidence_id)
+    ev = await _get_or_404(db, evidence_id, user)
     if ev.content_file_path and os.path.exists(ev.content_file_path):
         os.remove(ev.content_file_path)
     await db.delete(ev)
     await db.commit()
 
 
-async def _get_or_404(db: AsyncSession, evidence_id: str) -> Evidence:
+async def _get_or_404(db: AsyncSession, evidence_id: str, user) -> Evidence:
     result = await db.execute(select(Evidence).where(Evidence.id == evidence_id))
     ev = result.scalar_one_or_none()
     if not ev:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evidence not found")
+    await _assert_case_access(db, ev.case_id, user)
     return ev

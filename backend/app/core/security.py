@@ -46,6 +46,10 @@ class ClassificationLevel(str, Enum):
 
 
 class TokenPayload(BaseModel):
+    """Decoded JWT payload. Extra fields (iss/aud) are accepted but ignored."""
+
+    model_config = {"extra": "ignore"}
+
     sub: str
     scopes: list[str] = []
     type: str = "access"
@@ -99,6 +103,8 @@ def create_access_token(
         "iat": datetime.now(timezone.utc),
         "sid": session_id or _generate_session_id(),
         "classification": classification,
+        "iss": settings.JWT_ISSUER,
+        "aud": settings.JWT_AUDIENCE,
     })
     encoded = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded, jti
@@ -117,6 +123,8 @@ def create_refresh_token(
         "jti": jti,
         "iat": datetime.now(timezone.utc),
         "sid": session_id or _generate_session_id(),
+        "iss": settings.JWT_ISSUER,
+        "aud": settings.JWT_AUDIENCE,
     })
     encoded = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded, jti
@@ -147,31 +155,31 @@ def create_token_pair(
 
 
 def verify_token(token: str) -> TokenPayload:
+    """Decode + validate signature, expiry, issuer and audience claims."""
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=[settings.ALGORITHM],
+            audience=settings.JWT_AUDIENCE,
+            issuer=settings.JWT_ISSUER,
+            options={"require": ["exp", "iat", "sub", "type", "jti"]},
+        )
         return TokenPayload(**payload)
     except JWTError as exc:
         raise ValueError(f"Invalid token: {exc}") from exc
 
 
-def verify_token_not_revoked(token_payload: TokenPayload, blacklist: Any = None) -> bool:
-    if blacklist and token_payload.jti:
-        import asyncio
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    future = pool.submit(asyncio.run, blacklist.is_blacklisted(token_payload.jti))
-                    is_revoked = future.result(timeout=2)
-            else:
-                is_revoked = asyncio.run(blacklist.is_blacklisted(token_payload.jti))
-            if is_revoked:
-                raise ValueError("Token has been revoked")
-        except ValueError:
-            raise
-        except Exception:
-            pass
+async def verify_token_not_revoked(token_payload: TokenPayload, blacklist: Any = None) -> bool:
+    """Async revocation check. Raises ValueError if the JTI is blacklisted.
+
+    Returns True when no blacklist is provided or the token is still valid.
+    """
+    if blacklist is None or not token_payload.jti:
+        return True
+    is_revoked = await blacklist.is_blacklisted(token_payload.jti)
+    if is_revoked:
+        raise ValueError("Token has been revoked")
     return True
 
 
