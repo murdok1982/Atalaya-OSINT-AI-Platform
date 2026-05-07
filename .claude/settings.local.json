@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(cp .env.example .env.tmp)",
-      "Bash(docker compose *)",
-      "Bash(python -c \"import yaml; yaml.safe_load\\(open\\('docker-compose.yml'\\)\\); print\\('docker-compose.yml: YAML OK'\\)\")"
-    ]
-  }
-}
