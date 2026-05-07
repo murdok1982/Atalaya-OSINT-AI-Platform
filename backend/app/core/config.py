@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     # Application
     APP_NAME: str = "Atalaya OSINT Platform"
     APP_VERSION: str = "2.0.0"
-    ENVIRONMENT: Literal["development", "production", "testing"] = "development"
+    ENVIRONMENT: Literal["development", "staging", "production", "testing"] = "development"
     LOG_LEVEL: str = "INFO"
     SECRET_KEY: str = _INSECURE_SECRET
     ALGORITHM: str = "HS256"
@@ -196,13 +196,39 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production_secrets(self) -> Self:
-        if self.ENVIRONMENT == "production" and self.SECRET_KEY == _INSECURE_SECRET:
+        if self.ENVIRONMENT != "production":
+            return self
+
+        # SECRET_KEY hardening
+        if self.SECRET_KEY == _INSECURE_SECRET:
             raise ValueError(
                 "SECRET_KEY must be changed from the default value before running in production. "
                 "Generate one with: python scripts/generate_keys.py"
             )
-        if self.ENVIRONMENT == "production" and len(self.SECRET_KEY) < 32:
+        if len(self.SECRET_KEY) < 32:
             raise ValueError("SECRET_KEY must be at least 32 characters in production")
+
+        # Reject well-known weak / default credentials documented in .env.example.
+        # Anything here would let an attacker join the trust boundary on a fresh install.
+        _DEFAULT_REDIS = {"", "redis", "redis_pass", "redis_secure_pass", "password", "changeme"}
+        if self.REDIS_PASSWORD.lower() in _DEFAULT_REDIS:
+            raise ValueError(
+                "REDIS_PASSWORD must be set to a strong, non-default value in production"
+            )
+
+        if self.has_graph_db:
+            _DEFAULT_NEO4J = {"", "neo4j", "neo4j_pass", "password", "changeme"}
+            if self.NEO4J_PASSWORD.lower() in _DEFAULT_NEO4J:
+                raise ValueError(
+                    "NEO4J_PASSWORD must be set to a strong, non-default value in production"
+                )
+
+        # CORS / hosts must not be wildcarded in production
+        if "*" in self.CORS_ORIGINS:
+            raise ValueError("CORS_ORIGINS must not contain '*' in production")
+        if "*" in self.ALLOWED_HOSTS:
+            raise ValueError("ALLOWED_HOSTS must not contain '*' in production")
+
         return self
 
     @model_validator(mode="after")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Annotated
@@ -17,6 +18,40 @@ from app.models.evidence import Evidence
 from app.schemas.evidence import EvidenceCreate, EvidenceListItem, EvidenceResponse
 
 router = APIRouter()
+
+# Allow only safe characters in stored filenames; collapse the rest to '_'
+_SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
+_MAX_FILENAME_LEN = 128
+
+
+def _safe_filename(name: str | None) -> str:
+    """Strip directory components and unsafe characters to prevent path traversal.
+
+    Returns a sanitized basename safe to concatenate with a storage directory.
+    Never returns an empty string (falls back to ``upload.bin``).
+    """
+    if not name:
+        return "upload.bin"
+    # Drop any path components (handles both POSIX and Windows separators)
+    base = os.path.basename(name.replace("\\", "/"))
+    # Reject NUL bytes / control chars and traversal sequences explicitly
+    base = base.replace("\x00", "").lstrip(".")
+    base = _SAFE_FILENAME_RE.sub("_", base)
+    if not base or base in {".", ".."}:
+        return "upload.bin"
+    return base[:_MAX_FILENAME_LEN]
+
+
+_CASE_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+
+
+def _validate_case_id(case_id: str) -> str:
+    if not _CASE_ID_RE.match(case_id or ""):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid case_id",
+        )
+    return case_id
 
 
 @router.get("", response_model=list[EvidenceListItem])
@@ -79,17 +114,27 @@ async def upload_evidence(
 
     content_hash = hashlib.sha256(content).hexdigest()
     ev_id = str(uuid.uuid4())
-    case_dir = os.path.join(settings.EVIDENCE_STORAGE_PATH, case_id)
+    safe_case_id = _validate_case_id(case_id)
+    safe_name = _safe_filename(file.filename)
+
+    storage_root = os.path.realpath(settings.EVIDENCE_STORAGE_PATH)
+    case_dir = os.path.realpath(os.path.join(storage_root, safe_case_id))
+    # Defense-in-depth: ensure the resolved case_dir is still inside storage_root
+    if os.path.commonpath([storage_root, case_dir]) != storage_root:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid path")
     os.makedirs(case_dir, exist_ok=True)
-    file_path = os.path.join(case_dir, f"{ev_id}_{file.filename}")
+
+    file_path = os.path.realpath(os.path.join(case_dir, f"{ev_id}_{safe_name}"))
+    if os.path.commonpath([case_dir, file_path]) != case_dir:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid path")
 
     with open(file_path, "wb") as f:
         f.write(content)
 
     evidence = Evidence(
         id=ev_id,
-        case_id=case_id,
-        title=file.filename or ev_id,
+        case_id=safe_case_id,
+        title=safe_name,
         evidence_type="FILE",
         content_hash=content_hash,
         content_file_path=file_path,
@@ -113,6 +158,50 @@ async def get_evidence(
     return EvidenceResponse.model_validate(ev)
 
 
+@router.get("/{evidence_id}/custody")
+async def get_evidence_custody(
+    evidence_id: str,
+    db: DBSession,
+    user: Annotated[object, Depends(require_scope("read:cases"))],
+) -> dict[str, object]:
+    """Returns the chain-of-custody for the evidence, recomputing the SHA-256
+    hash of the stored file (if present) to verify integrity on-the-fly.
+    """
+    from app.models.intel_records import ChainOfCustodyRecord
+    from sqlalchemy import select as _select
+
+    ev = await _get_or_404(db, evidence_id)
+
+    integrity_ok = True
+    recomputed_hash = ev.content_hash
+    if ev.content_file_path and os.path.exists(ev.content_file_path):
+        h = hashlib.sha256()
+        with open(ev.content_file_path, "rb") as fp:
+            for chunk in iter(lambda: fp.read(1024 * 1024), b""):
+                h.update(chunk)
+        recomputed_hash = h.hexdigest()
+        integrity_ok = (recomputed_hash == ev.content_hash)
+
+    rec = (
+        await db.execute(
+            _select(ChainOfCustodyRecord).where(ChainOfCustodyRecord.evidence_id == evidence_id)
+        )
+    ).scalar_one_or_none()
+
+    return {
+        "evidence_id": evidence_id,
+        "stored_hash": ev.content_hash,
+        "recomputed_hash": recomputed_hash,
+        "integrity_verified": integrity_ok,
+        "collected_at": ev.collected_at.isoformat() if ev.collected_at else None,
+        "collected_by": ev.collected_by,
+        "custody_chain": (rec.custody_chain if rec else []) or [],
+        "last_verification": (
+            rec.last_verification.isoformat() if rec and rec.last_verification else None
+        ),
+    }
+
+
 @router.get("/{evidence_id}/content")
 async def get_evidence_content(
     evidence_id: str,
@@ -122,7 +211,12 @@ async def get_evidence_content(
     ev = await _get_or_404(db, evidence_id)
     if not ev.content_file_path or not os.path.exists(ev.content_file_path):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-    return FileResponse(ev.content_file_path)
+    # Confine reads to the configured evidence storage root
+    storage_root = os.path.realpath(settings.EVIDENCE_STORAGE_PATH)
+    real_path = os.path.realpath(ev.content_file_path)
+    if os.path.commonpath([storage_root, real_path]) != storage_root:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Path outside storage root")
+    return FileResponse(real_path)
 
 
 @router.delete("/{evidence_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -1,8 +1,11 @@
-import type { NextConfig } from 'next'
-
+/** @type {import('next').NextConfig} */
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://127.0.0.1:8000'
 
-const nextConfig: NextConfig = {
+const nextConfig = {
+  // Required by Dockerfile (COPY .next/standalone)
+  output: 'standalone',
+  reactStrictMode: true,
+  poweredByHeader: false,
   async rewrites() {
     return [
       {

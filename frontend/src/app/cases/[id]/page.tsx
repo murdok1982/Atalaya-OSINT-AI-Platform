@@ -47,7 +47,7 @@ export default function CaseDetailPage() {
   async function handleDeleteEvidence(evidenceId: string) {
     if (!confirm('Delete this evidence item?')) return
     try {
-      await fetch(`/api/v1/evidence/${evidenceId}`, { method: 'DELETE', headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` } })
+      await api.deleteEvidence(evidenceId)
       toast.success('Evidence deleted')
       mutateEvidence()
     } catch {

@@ -10,7 +10,6 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core.config import settings
-from app.core.events import lifespan
 from app.core.logging import configure_logging
 from app.core.middleware import RateLimitMiddleware
 from app.core.waf import WAFSecurityHeadersMiddleware
@@ -21,21 +20,47 @@ configure_logging(settings.LOG_LEVEL, settings.ENVIRONMENT)
 @asynccontextmanager
 async def app_lifespan(app: FastAPI):
     from app.core.events_bus import event_bus
-    from app.core.token_blacklist import token_blacklist
+    from app.core.token_blacklist import token_blacklist as tb
     from app.core.rate_limiter import rate_limiter
-    from app.db.database import get_redis
-    from app.core.security import token_blacklist as tb
+    from app.db.session import get_redis_pool, close_connections
+    from app.db.init_db import create_all_tables, seed_admin_user
+    import os
+
+    # Ensure storage directories exist before startup
+    for path in [
+        settings.EVIDENCE_STORAGE_PATH,
+        settings.REPORTS_STORAGE_PATH,
+        settings.LOGS_PATH,
+    ]:
+        os.makedirs(path, exist_ok=True)
+
+    # Bootstrap schema in dev/test only — production must use Alembic
+    if not settings.is_production:
+        try:
+            await create_all_tables()
+            await seed_admin_user()
+        except Exception as exc:  # noqa: BLE001
+            from app.core.logging import get_logger
+            get_logger("main").error("startup_db_init_failed", error=str(exc))
 
     await event_bus.initialize()
 
-    redis_client = await get_redis()
-    if redis_client:
-        tb._redis = redis_client
-        rate_limiter._redis = redis_client
+    try:
+        redis_client = await get_redis_pool()
+        if redis_client is not None:
+            tb._redis = redis_client
+            rate_limiter._redis = redis_client
+    except Exception as exc:  # noqa: BLE001
+        from app.core.logging import get_logger
+        get_logger("main").warning("redis_unavailable_at_startup", error=str(exc))
 
     yield
 
     await event_bus.shutdown()
+    try:
+        await close_connections()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 app = FastAPI(
@@ -137,17 +162,18 @@ async def root() -> dict[str, str]:
 
 @app.get("/health", tags=["Health"])
 async def health_check() -> dict[str, Any]:
-    from app.db.database import check_database_connection, check_redis_connection
+    from app.db.session import check_database_connection, check_redis_connection
+    import time as _time
 
     db_ok = await check_database_connection()
     redis_ok = await check_redis_connection()
 
-    status = "healthy" if (db_ok and redis_ok) else "degraded"
+    overall = "healthy" if (db_ok and redis_ok) else "degraded"
 
     return {
-        "status": status,
+        "status": overall,
         "version": settings.APP_VERSION,
-        "timestamp": __import__("time").time(),
+        "timestamp": _time.time(),
         "checks": {
             "database": "ok" if db_ok else "error",
             "redis": "ok" if redis_ok else "error",
@@ -157,7 +183,7 @@ async def health_check() -> dict[str, Any]:
 
 @app.get("/health/ready", tags=["Health"])
 async def readiness_check() -> dict[str, Any]:
-    from app.db.database import check_database_connection, check_redis_connection
+    from app.db.session import check_database_connection, check_redis_connection
     from app.core.events_bus import event_bus
 
     db_ok = await check_database_connection()

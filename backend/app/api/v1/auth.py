@@ -2,23 +2,19 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, status
 from sqlalchemy import select, update
 
-from app.api.deps import CurrentUser, DBSession, get_token_blacklist
+from app.api.deps import AdminUser, CurrentUser, DBSession, get_token_blacklist
 from app.core.audit import AuditAction, AuditContext, log_audit
 from app.core.bruteforce import BruteForceProtector
-from app.core.config import settings
 from app.core.events_bus import EventType, AtalayaEvent, event_bus
 from app.core.security import (
     create_token_pair,
-    create_access_token,
-    create_refresh_token,
     get_password_hash,
     validate_password_strength,
     verify_password,
     verify_token,
-    SessionToken,
 )
 from app.models.user import User
 from app.schemas.user import LoginRequest, PasswordChange, Token, TokenRefresh, UserResponse, UserCreate
@@ -82,7 +78,7 @@ async def login(
     BruteForceProtector.record_success(body.username, client_ip)
 
     token_pair = create_token_pair(
-        user_id=str(user.id),
+        user_id=user.id,
         scopes=user.scopes,
         classification=getattr(user, "classification", "UNCLASSIFIED"),
     )
@@ -136,7 +132,7 @@ async def refresh(body: TokenRefresh, db: DBSession) -> Token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
 
     token_pair = create_token_pair(
-        user_id=str(user.id),
+        user_id=user.id,
         scopes=user.scopes,
         session_id=payload.sid,
     )
@@ -214,12 +210,7 @@ async def change_password(
     await db.commit()
 
 
-@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register_user(
-    body: UserCreate,
-    db: DBSession,
-    request: Request,
-) -> User:
+async def _create_user(db, body: UserCreate, request: Request, *, created_by: str) -> User:
     issues = validate_password_strength(body.password)
     if issues:
         raise HTTPException(
@@ -241,7 +232,90 @@ async def register_user(
         hashed_password=get_password_hash(body.password),
         full_name=body.full_name or "",
         scopes=body.scopes or ["read:cases", "write:cases", "execute:jobs"],
-        classification=body.classification if hasattr(body, "classification") else "UNCLASSIFIED",
+        classification=getattr(body, "classification", "UNCLASSIFIED"),
+        tenant_id=getattr(body, "tenant_id", "default") or "default",
+        department=getattr(body, "department", None),
+        phone=getattr(body, "phone", None),
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+
+    await log_audit(
+        AuditContext(
+            user_id=created_by,
+            action=AuditAction.CREATE,
+            resource_type="user",
+            resource_id=user.id,
+            ip_address=request.client.host if request.client else "",
+            request_id=getattr(request.state, "request_id", ""),
+            details={"created_username": user.username, "scopes": user.scopes,
+                     "classification": user.classification},
+        ),
+        db=db,
+    )
+    return user
+
+
+@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def register_user(
+    body: UserCreate,
+    db: DBSession,
+    request: Request,
+    admin: AdminUser,
+) -> User:
+    """Admin-only user provisioning. Self-registration is forbidden in state-grade deployments.
+
+    For the very first user use POST /auth/bootstrap-admin (only succeeds when the users
+    table is empty).
+    """
+    return await _create_user(db, body, request, created_by=admin.id)
+
+
+@router.post(
+    "/bootstrap-admin",
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def bootstrap_admin(
+    body: UserCreate,
+    db: DBSession,
+    request: Request,
+) -> User:
+    """One-shot endpoint: only succeeds when no users exist (fresh install).
+
+    Creates the first superuser. Subsequent calls return 409.
+    """
+    existing_any = await db.execute(select(User).limit(1))
+    if existing_any.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Bootstrap already complete; use POST /auth/register (admin-only)",
+        )
+
+    issues = validate_password_strength(body.password)
+    if issues:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"message": "Password does not meet requirements", "issues": issues},
+        )
+
+    admin_scopes = sorted({
+        "admin", "read:cases", "write:cases", "read:reports", "write:reports",
+        "read:evidence", "write:evidence", "read:entities", "write:entities",
+        "read:users", "write:users", "execute:jobs", "audit:log", "system:config",
+    })
+
+    user = User(
+        username=body.username,
+        email=body.email,
+        hashed_password=get_password_hash(body.password),
+        full_name=body.full_name or "Bootstrap Admin",
+        is_active=True,
+        is_superuser=True,
+        scopes=admin_scopes,
+        classification=getattr(body, "classification", "TOP_SECRET") or "TOP_SECRET",
+        tenant_id=getattr(body, "tenant_id", "default") or "default",
     )
     db.add(user)
     await db.commit()
@@ -255,10 +329,10 @@ async def register_user(
             resource_id=user.id,
             ip_address=request.client.host if request.client else "",
             request_id=getattr(request.state, "request_id", ""),
+            details={"bootstrap": True, "username": user.username},
         ),
         db=db,
     )
-
     return user
 
 

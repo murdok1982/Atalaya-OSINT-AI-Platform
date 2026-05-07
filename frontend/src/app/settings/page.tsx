@@ -334,7 +334,7 @@ function SystemTab({ health }: { health?: SystemHealth }) {
       <SectionCard title="Legal & Ethics">
         <div className="space-y-3 text-xs text-gray-400 leading-relaxed">
           <p>Atalaya is an open-source intelligence platform designed for lawful investigations. Use is restricted to publicly available information and targets for which you have explicit authorization.</p>
-          <p>Never use this platform to investigate individuals without authorization. Ensure compliance with applicable privacy laws (GDPR, CCPA, etc.) and your organization's security policies.</p>
+          <p>Never use this platform to investigate individuals without authorization. Ensure compliance with applicable privacy laws (GDPR, CCPA, etc.) and your organization&apos;s security policies.</p>
           <p>All investigations are logged in the audit trail. Evidence is hash-verified for chain of custody integrity.</p>
         </div>
       </SectionCard>

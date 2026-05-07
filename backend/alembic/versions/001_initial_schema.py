@@ -155,17 +155,22 @@ def upgrade() -> None:
         'audit_logs',
         sa.Column('id', sa.String(36), nullable=False),
         sa.Column('timestamp', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.Column('user_id', sa.String(128), nullable=False, server_default=''),
+        sa.Column('username', sa.String(64), nullable=False, server_default=''),
         sa.Column('action', sa.String(32), nullable=False),
-        sa.Column('actor_id', sa.String(36), nullable=True),
-        sa.Column('actor_username', sa.String(64), nullable=True),
-        sa.Column('resource_type', sa.String(32), nullable=True),
-        sa.Column('resource_id', sa.String(36), nullable=True),
+        sa.Column('resource_type', sa.String(64), nullable=False),
+        sa.Column('resource_id', sa.String(128), nullable=False, server_default=''),
         sa.Column('details', postgresql.JSONB(), nullable=False, server_default='{}'),
-        sa.Column('ip_address', sa.String(45), nullable=True),
+        sa.Column('ip_address', sa.String(64), nullable=False, server_default=''),
+        sa.Column('user_agent', sa.Text(), nullable=False, server_default=''),
+        sa.Column('request_id', sa.String(64), nullable=False, server_default=''),
         sa.Column('success', sa.Boolean(), nullable=False, server_default='true'),
+        sa.Column('error_message', sa.Text(), nullable=False, server_default=''),
         sa.PrimaryKeyConstraint('id'),
     )
-    op.create_index('ix_audit_logs_actor_id', 'audit_logs', ['actor_id'])
+    op.create_index('ix_audit_logs_user_id', 'audit_logs', ['user_id'])
+    op.create_index('ix_audit_logs_action', 'audit_logs', ['action'])
+    op.create_index('ix_audit_logs_resource_type', 'audit_logs', ['resource_type'])
     op.create_index('ix_audit_logs_timestamp', 'audit_logs', ['timestamp'])
 
 

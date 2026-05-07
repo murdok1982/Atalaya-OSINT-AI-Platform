@@ -16,7 +16,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     configure_logging(settings.LOG_LEVEL, settings.ENVIRONMENT)
     logger.info("atalaya_starting", environment=settings.ENVIRONMENT)
 
-    from app.db.session import engine, redis_client  # noqa: PLC0415
+    from app.db.session import engine, get_redis_pool  # noqa: PLC0415
     from app.db.init_db import create_all_tables  # noqa: PLC0415
     import os  # noqa: PLC0415
 
@@ -24,13 +24,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     for path in [settings.EVIDENCE_STORAGE_PATH, settings.REPORTS_STORAGE_PATH, settings.LOGS_PATH]:
         os.makedirs(path, exist_ok=True)
 
-    await create_all_tables()
-    logger.info("database_ready")
+    if not settings.is_production:
+        await create_all_tables()
+        logger.info("database_ready")
 
-    # Verify Redis connectivity
+    # Verify Redis connectivity (lazy — get_redis_pool may return None on init failure)
+    redis_client = None
     try:
-        await redis_client.ping()
-        logger.info("redis_ready")
+        redis_client = await get_redis_pool()
+        if redis_client is not None:
+            await redis_client.ping()
+            logger.info("redis_ready")
     except Exception as exc:  # noqa: BLE001
         logger.warning("redis_unavailable", error=str(exc))
 
@@ -40,5 +44,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     logger.info("atalaya_shutting_down")
     await engine.dispose()
-    await redis_client.aclose()
+    if redis_client is not None:
+        try:
+            await redis_client.aclose()
+        except Exception:  # noqa: BLE001
+            pass
     logger.info("atalaya_stopped")

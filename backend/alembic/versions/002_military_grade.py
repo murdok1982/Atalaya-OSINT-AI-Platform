@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "002_military_grade"
-down_revision: Union[str, None] = None
+down_revision: Union[str, None] = "001"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -39,6 +39,8 @@ def upgrade() -> None:
         sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("revoked_by", sa.String(36), nullable=True),
         sa.Column("reason", sa.String(256), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
     )
 
     op.create_table(
@@ -51,7 +53,9 @@ def upgrade() -> None:
         sa.Column("resource", sa.String(256), nullable=False),
         sa.Column("details", sa.JSON(), nullable=True),
         sa.Column("previous_hash", sa.String(256), nullable=False),
-        sa.Column("hash", sa.String(256), nullable=False, index=True),
+        sa.Column("hash_value", sa.String(256), nullable=False, index=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
     )
 
     op.create_table(
@@ -64,6 +68,8 @@ def upgrade() -> None:
         sa.Column("custody_chain", sa.JSON(), nullable=True),
         sa.Column("integrity_verified", sa.Boolean(), nullable=False, server_default="true"),
         sa.Column("last_verification", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
     )
 
     op.create_table(
@@ -80,6 +86,8 @@ def upgrade() -> None:
         sa.Column("recommendations", sa.JSON(), nullable=True),
         sa.Column("graph_data", sa.JSON(), nullable=True),
         sa.Column("classification", sa.String(32), nullable=False, server_default="UNCLASSIFIED"),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
     )
 
     op.create_table(
@@ -96,6 +104,8 @@ def upgrade() -> None:
         sa.Column("properties", sa.JSON(), nullable=True),
         sa.Column("kill_chain_phases", sa.JSON(), nullable=True),
         sa.Column("external_references", sa.JSON(), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
     )
 
 

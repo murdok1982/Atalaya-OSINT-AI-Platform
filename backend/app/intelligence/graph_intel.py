@@ -135,15 +135,55 @@ class GraphIntelligence:
         return all_paths
 
     def export_neo4j_cypher(self) -> list[str]:
+        """Generate Cypher MERGE statements for visual export ONLY.
+
+        SECURITY: The returned strings interpolate node/edge values directly into
+        Cypher source. They are SAFE to display, log or attach to a report, but
+        MUST NOT be sent to a live Neo4j driver — that would constitute a Cypher
+        injection sink. To persist a graph, use the official driver with
+        parameterized queries: ``session.run("MERGE (n {id:$id})", id=node.node_id)``.
+
+        Labels and relationship types are constrained to ``[A-Za-z0-9_]`` to
+        avoid breaking out of identifier position even in the export string.
+        """
+        import re as _re
+
+        def _safe_ident(value: str, fallback: str) -> str:
+            cleaned = _re.sub(r"[^A-Za-z0-9_]", "", value or "")
+            return cleaned or fallback
+
+        def _quote(value: str) -> str:
+            # Escape single-quotes and backslashes so the export string remains
+            # syntactically valid even if values contain quotes.
+            return value.replace("\\", "\\\\").replace("'", "\\'")
+
         statements = []
         for node in self._nodes.values():
-            props = ", ".join(f"{k}: '{v}'" for k, v in node.properties.items() if isinstance(v, str))
-            stmt = f"MERGE (n:{node.node_type} {{id: '{node.node_id}', label: '{node.label}'{', ' + props if props else ''}}})"
+            label = _safe_ident(node.node_type, "Node")
+            props = ", ".join(
+                f"{_safe_ident(k, 'p')}: '{_quote(v)}'"
+                for k, v in node.properties.items()
+                if isinstance(v, str)
+            )
+            stmt = (
+                f"MERGE (n:{label} {{id: '{_quote(node.node_id)}', "
+                f"label: '{_quote(node.label)}'{', ' + props if props else ''}}})"
+            )
             statements.append(stmt)
 
         for edge in self._edges:
-            props = ", ".join(f"{k}: '{v}'" for k, v in edge.properties.items() if isinstance(v, str))
-            stmt = f"MATCH (a {{id: '{edge.source}'}), (b {{id: '{edge.target}'}}) MERGE (a)-[r:{edge.relationship} {{{', ' + props if props else ''}}}]->(b)"
+            rel = _safe_ident(edge.relationship, "RELATED_TO")
+            props = ", ".join(
+                f"{_safe_ident(k, 'p')}: '{_quote(v)}'"
+                for k, v in edge.properties.items()
+                if isinstance(v, str)
+            )
+            extra_props = (", " + props) if props else ""
+            stmt = (
+                f"MATCH (a {{id: '{_quote(edge.source)}'}}), "
+                f"(b {{id: '{_quote(edge.target)}'}}) "
+                f"MERGE (a)-[r:{rel} {{{extra_props}}}]->(b)"
+            )
             statements.append(stmt)
 
         return statements

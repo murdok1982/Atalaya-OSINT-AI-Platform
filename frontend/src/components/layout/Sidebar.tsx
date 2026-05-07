@@ -4,9 +4,10 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, FolderOpen, Network, Activity,
-  FileText, Settings, LogOut, Hexagon,
+  FileText, Settings, LogOut, Hexagon, ScrollText,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { clearAccessToken } from '@/lib/api'
 
 const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -14,6 +15,7 @@ const navItems = [
   { href: '/entities', label: 'Entities', icon: Network },
   { href: '/jobs', label: 'Jobs', icon: Activity },
   { href: '/reports', label: 'Reports', icon: FileText },
+  { href: '/audit', label: 'Audit', icon: ScrollText },
 ]
 
 export default function Sidebar() {
@@ -68,10 +70,11 @@ export default function Sidebar() {
         </Link>
         <button
           onClick={() => {
-            localStorage.removeItem('access_token')
+            clearAccessToken()
             window.location.href = '/login'
           }}
           className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-400 hover:text-red-400 hover:bg-red-400/10 transition-colors w-full text-left"
+          aria-label="Sign out"
         >
           <LogOut className="w-4 h-4" />
           Logout
