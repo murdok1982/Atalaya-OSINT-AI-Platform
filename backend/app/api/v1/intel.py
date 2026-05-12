@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DBSession
@@ -10,6 +11,25 @@ from app.core.stix import STIXBundle, STIXObject, STIXType
 from app.models.intel_records import IntelligenceFusionRecord, STIXObjectRecord
 
 router = APIRouter()
+
+class OSINTLookupRequest(BaseModel):
+    target: str = Field(..., json_schema_extra={"example": "example.com"})
+    modules: list[str] = Field(..., json_schema_extra={"example": ["dns", "whois", "ssl"]})
+
+class STIXResponseSchema(BaseModel):
+    id: str = Field(..., json_schema_extra={"example": "bundle--c5264877-ab8c-4f1d-b541-2b04f5e71440"})
+    type: str = Field("bundle", json_schema_extra={"example": "bundle"})
+    spec_version: str = Field("2.1", json_schema_extra={"example": "2.1"})
+    objects: list[dict[str, Any]] = Field(..., json_schema_extra={"example": [{
+        "type": "indicator",
+        "spec_version": "2.1",
+        "id": "indicator--8e2e2d2b-17d4-4cbf-938f-98ee46b3cd3f",
+        "created": "2023-01-01T00:00:00.000Z",
+        "modified": "2023-01-01T00:00:00.000Z",
+        "pattern": "[domain-name:value = 'example.com']",
+        "pattern_type": "stix",
+        "valid_from": "2023-01-01T00:00:00.000Z"
+    }]})
 
 _CLASSIFICATION_ORDER = ["UNCLASSIFIED", "CUI", "CONFIDENTIAL", "SECRET", "TOP_SECRET"]
 
@@ -56,7 +76,7 @@ async def list_fusion_records(
     ]
 
 
-@router.get("/stix/export")
+@router.get("/stix/export", response_model=STIXResponseSchema)
 async def export_stix_bundle(
     db: DBSession,
     user: CurrentUser,
@@ -108,4 +128,18 @@ async def export_stix_bundle(
         "type": "bundle",
         "spec_version": "2.1",
         "objects": [o.to_stix_dict() for o in bundle.objects],
+    }
+
+
+@router.post("/osint/lookup")
+async def osint_lookup(
+    request: OSINTLookupRequest,
+    user: CurrentUser,
+) -> dict:
+    """MVP OSINT lookup endpoint."""
+    return {
+        "target": request.target,
+        "status": "processing",
+        "modules_invoked": request.modules,
+        "message": "OSINT lookup initiated successfully"
     }

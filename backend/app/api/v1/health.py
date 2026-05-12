@@ -55,3 +55,14 @@ async def health_detailed(
         "telegram_configured": bool(settings.TELEGRAM_BOT_TOKEN),
         "allowed_origins": settings.CORS_ORIGINS,
     }
+
+
+@router.get("/modules")
+async def health_modules() -> dict:
+    return {
+        "osint": {"status": "operational", "last_check": time.time()},
+        "socmint": {"status": "not_implemented", "reason": "Pending MVP integration"},
+        "imint": {"status": "not_implemented", "reason": "Pending MVP integration"},
+        "finint": {"status": "not_implemented", "reason": "Pending MVP integration"},
+        "darkweb": {"status": "not_implemented", "reason": "Pending MVP integration"}
+    }

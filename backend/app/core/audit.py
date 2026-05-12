@@ -17,6 +17,27 @@ _GENESIS_HASH = "genesis"
 _chain_lock = asyncio.Lock()
 
 
+class AuditChain:
+    """MVP memory-based audit chain implementation."""
+    def __init__(self, previous_hash: str = _GENESIS_HASH):
+        self.previous_hash = previous_hash
+    
+    def log_event(self, user: str, action: str, data: dict) -> dict:
+        import datetime
+        event = {
+            "timestamp": datetime.datetime.utcnow().isoformat(),
+            "user": user,
+            "action": action,
+            "data_hash": hashlib.sha256(json.dumps(data).encode()).hexdigest(),
+            "previous_hash": self.previous_hash
+        }
+        event["current_hash"] = hashlib.sha256(
+            json.dumps(event, sort_keys=True).encode()
+        ).hexdigest()
+        self.previous_hash = event["current_hash"]
+        return event
+
+
 def _compute_chain_hash(
     prev_hash: str,
     index: int,
