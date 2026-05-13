@@ -37,9 +37,14 @@ dnspython==2.6.1
 python-whois==0.9.4
 trafilatura==1.11.0
 beautifulsoup4==4.12.3
+lxml==5.2.2
 duckduckgo-search==6.2.6
 certifi==2024.7.4
 PySocks==1.7.1
+
+# Geoint / RSS / YouTube OSINT
+feedparser==6.0.11
+fake-useragent==1.5.1
 
 # Document processing
 pypdf==4.3.1

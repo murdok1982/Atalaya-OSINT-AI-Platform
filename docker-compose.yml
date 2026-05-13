@@ -146,6 +146,55 @@ services:
     profiles:
       - full
 
+  ollama:
+    image: ollama/ollama:latest
+    container_name: atalaya-ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    expose:
+      - "11434"
+    environment:
+      OLLAMA_HOST: "0.0.0.0:11434"
+      OLLAMA_ORIGINS: "http://backend:8000,http://localhost:8000"
+      OLLAMA_DEBUG: "0"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:11434/api/tags"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - atalaya-data
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+          cpus: "4.0"
+
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: atalaya-ollama-init
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      OLLAMA_HOST: "ollama:11434"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        sleep 10
+        ollama pull ${GEOINT_LLM_MODEL:-gemma4:4b}
+        echo "Model ready."
+    depends_on:
+      ollama:
+        condition: service_healthy
+    networks:
+      - atalaya-data
+    profiles:
+      - ollama-init
+
   backend:
     build:
       context: ./backend
@@ -163,6 +212,9 @@ services:
       NEO4J_USERNAME: ${NEO4J_USERNAME:-neo4j}
       NEO4J_PASSWORD: ${NEO4J_PASSWORD:-neo4j_pass}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      OLLAMA_BASE_URL: http://ollama:11434
+      GEOINT_LLM_PROVIDER: ollama
+      GEOINT_LLM_MODEL: ${GEOINT_LLM_MODEL:-gemma4:4b}
     volumes:
       - evidence_data:/var/atalaya/evidence
       - reports_data:/var/atalaya/reports
@@ -176,6 +228,8 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_started
+      ollama:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - atalaya-frontend
@@ -316,6 +370,7 @@ volumes:
   logs_data:
   prometheus_data:
   grafana_data:
+  ollama_data:
 
 networks:
   atalaya-frontend:
