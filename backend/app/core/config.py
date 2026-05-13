@@ -147,20 +147,10 @@ class Settings(BaseSettings):
     TOR_PROXY_URL: str = "socks5://127.0.0.1:9050"
     DARK_WEB_ENABLED: bool = False
 
-    # GEOINT (imagery)
+    # GEOINT
     SENTINEL_HUB_CLIENT_ID: str = ""
     SENTINEL_HUB_CLIENT_SECRET: str = ""
     MAPBOX_TOKEN: str = ""
-
-    # GEOINT Weekly Intelligence Reports
-    GEOINT_WEEKLY_ENABLED: bool = True
-    GEOINT_SCHEDULE_CRON: str = "0 6 * * MON"  # Every Monday at 06:00 UTC
-    GEOINT_LLM_PROVIDER: str = "ollama"
-    GEOINT_LLM_MODEL: str = "gemma4:4b"
-    GEOINT_DEFAULT_CLASSIFICATION: str = "UNCLASSIFIED"
-    GEOINT_DEFAULT_REGIONS: list[str] = ["global", "latam"]
-    GEOINT_DAYS_BACK: int = 7
-    YOUTUBE_API_KEY: str = ""
 
     # FININT
     BLOCKCHAIN_API_KEY: str = ""
@@ -187,15 +177,6 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return [item.strip() for item in v.split(",") if item.strip()]
         return v
-
-    @field_validator("GEOINT_DEFAULT_REGIONS", mode="before")
-    @classmethod
-    def parse_geoint_regions(cls, v: str | list) -> list[str]:
-        if isinstance(v, str) and v:
-            return [r.strip() for r in v.split(",") if r.strip()]
-        if isinstance(v, list):
-            return v
-        return ["global", "latam"]
 
     @field_validator("TELEGRAM_ALLOWED_CHATS", "LLM_FALLBACK_CHAIN", "CLASSIFICATION_LABELS", mode="before")
     @classmethod

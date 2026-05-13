@@ -7,7 +7,6 @@ from app.api.v1 import (
     config_router,
     entities,
     evidence,
-    geoint_reports,
     health,
     intel,
     jobs,
@@ -26,4 +25,3 @@ api_router.include_router(jobs.router, prefix="/jobs", tags=["jobs"])
 api_router.include_router(reports.router, prefix="/reports", tags=["reports"])
 api_router.include_router(health.router, prefix="/health", tags=["health"])
 api_router.include_router(config_router.router, prefix="/config", tags=["config"])
-api_router.include_router(geoint_reports.router, prefix="/geoint", tags=["geoint"])
